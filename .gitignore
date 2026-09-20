@@ -1,0 +1,5 @@
+﻿node_modules/
+.next/
+.env
+notepad .gitignore
+public/Videos/
