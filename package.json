@@ -1,12 +1,16 @@
 {
   "name": "nextjs-postgresql-template",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "snapshot": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/snapshot.ps1"
   },
   "dependencies": {
     "dotenv": "17.3.1",

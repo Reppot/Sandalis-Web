@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: sandalis-web
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: ACCESS_TOKEN
+        sync: false
+      - key: ACCESS_TOKENS_JSON
+        sync: false
