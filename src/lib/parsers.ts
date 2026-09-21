@@ -1,6 +1,5 @@
 import type { OrderLine, OrderUnit, StorageItem } from "./types";
 
-const HEADER_HINTS = /public|private|x:\s*[-\d.]+|y:\s*[-\d.]+|valley|port|king/i;
 const CRATE_SUFFIX = /\s*\((?:ящик|ящ|штука|шт|crate|crates?)\)\s*$/iu;
 const UNIT_SUFFIX = /\s+(?:ящиков|ящика|ящик|ящ|штук|штука|шт)\.?\s*$/iu;
 
@@ -14,11 +13,10 @@ function cleanName(raw: string): string {
     .trim();
 }
 
-/** Извлекает число из "50 шт.", "x 12 ящ", "12 ящиков", " 7" ... */
 function parseCount(raw: string): number | null {
   const cleaned = raw
     .toLowerCase()
-    .replace(/ящиков|ящика|ящик|ящ\.?|шт\.?|крат|crates?|crate|штук|шт/g, " ")
+    .replace(/ящиков|ящика|ящик|ящ\.?|шт\.?|crates?|crate|штук|шт/g, " ")
     .replace(/[x×]/g, " ")
     .trim();
   const m = cleaned.match(/-?\d+/);
@@ -39,17 +37,13 @@ export interface ParsedLine {
   unit: OrderUnit;
 }
 
-/**
- * Разбирает текстовый отчёт сканера / сообщение из Discord.
- * Поддерживает разделители: запятая, "->", двоеточие, а также "Название 50".
- */
+/** Разбирает текстовый отчёт скирнера/Discord-сообщение в список строк. */
 export function parseInventoryText(text: string): ParsedLine[] {
   const out: ParsedLine[] = [];
   const lines = text.split(/\r?\n/);
-  lines.forEach((rawLine, idx) => {
+  lines.forEach((rawLine) => {
     const line = rawLine.trim();
     if (!line) return;
-    if (/^(?:Clanshead|.+?\s-\s.+?\s-\s.+?\s-\s(?:Public|Private)).*X:\s*[-\d.]+\s+Y:\s*[-\d.]+.*,/iu.test(line)) return;
 
     let namePart = "";
     let countPart = "";
@@ -74,9 +68,6 @@ export function parseInventoryText(text: string): ParsedLine[] {
 
     const count = parseCount(countPart);
     const name = cleanName(namePart);
-    // Первая строка clipboard-отчёта — метаданные склада, например:
-    // "Clanshead Valley - The King - Морской порт - Public - X: ...,2026..."
-    if (idx === 0 && HEADER_HINTS.test(line)) return;
     if (!name || count === null || count < 0) return;
     out.push({ name, count, unit: detectUnit(countPart, namePart) });
   });
@@ -99,9 +90,9 @@ function fromJsonValue(value: unknown): ParsedLine[] | null {
     for (const entry of value) {
       if (entry && typeof entry === "object") {
         const rec = entry as JsonRecord;
-        const name = pick(rec, ["name", "Name", "item", "Item", "title", "название"]);
-        const count = pick(rec, ["count", "Count", "quantity", "qty", "amount", "количество"]);
-        const unit = pick(rec, ["unit", "Unit", "ед", "ед. изм."]);
+        const name = pick(rec, ["name", "item", "title", "название"]);
+        const count = pick(rec, ["count", "quantity", "qty", "amount", "количество"]);
+        const unit = pick(rec, ["unit", "ед"]);
         const n = typeof count === "number" ? count : parseCount(String(count ?? ""));
         if (typeof name === "string" && n !== null && n > 0) {
           out.push({ name: cleanName(name), count: n, unit: typeof unit === "string" ? detectUnit(unit) : "ящ." });
@@ -114,7 +105,7 @@ function fromJsonValue(value: unknown): ParsedLine[] | null {
   }
   if (value && typeof value === "object") {
     const rec = value as JsonRecord;
-    const nested = pick(rec, ["items", "Items", "data", "stockpile", "inventory"]);
+    const nested = pick(rec, ["items", "data", "stockpile", "inventory"]);
     if (nested !== undefined) return fromJsonValue(nested);
     const out: ParsedLine[] = [];
     for (const [k, v] of Object.entries(rec)) {
@@ -126,7 +117,7 @@ function fromJsonValue(value: unknown): ParsedLine[] | null {
   return null;
 }
 
-/** Универсальный вход: JSON (массив/словарь) либо текстовые строки */
+/** Универсальный вход: JSON (массив/словарь) либо текстовые строки. */
 export function parseInventoryPayload(text: string): ParsedLine[] {
   const trimmed = text.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
@@ -162,8 +153,7 @@ export function toOrderLines(lines: ParsedLine[]): OrderLine[] {
     if (l.count <= 0) continue;
     const key = mergeKey(l.name);
     const prev = merged.get(key);
-    if (prev && prev.unit === l.unit) prev.count += l.count;
-    else if (prev) prev.count += l.count;
+    if (prev) prev.count += l.count;
     else merged.set(key, { name: l.name, count: l.count, unit: l.unit });
   }
   return [...merged.values()];

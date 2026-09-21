@@ -18,7 +18,7 @@ export async function GET() {
   try {
     return Response.json(await buildResponse());
   } catch (error) {
-    console.error("GET /api/storage", error);
+    console.error("[SIND] GET /api/storage", error);
     return Response.json({ error: "Сбой чтения запасов склада" }, { status: 500 });
   }
 }
@@ -46,7 +46,7 @@ export async function PUT(req: Request) {
 
     return Response.json(await buildResponse());
   } catch (error) {
-    console.error("PUT /api/storage", error);
+    console.error("[SIND] PUT /api/storage", error);
     return Response.json({ error: "Сбой записи запасов склада" }, { status: 500 });
   }
 }

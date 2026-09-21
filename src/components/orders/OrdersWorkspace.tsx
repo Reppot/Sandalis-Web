@@ -1,24 +1,16 @@
 "use client";
 
-import { backgroundAsset, iconPath, STORAGE_KEYS } from "@/lib/constants";
+import { STORAGE_KEYS } from "@/lib/constants";
 import { buildTxt, canvasToBlob, copyBlobToClipboard, copyText, exportTxt, exportXlsx, importXlsx, renderReportPages, type ExportRow, type ReportMeta } from "@/lib/exporters";
 import { parseInventoryPayload, toOrderLines, toStorageItems, type ParsedLine } from "@/lib/parsers";
-import type { ExportFormat, OrderLine, PanelMode, SavedOrderDTO, ScanResponse, StorageItem, StorageResponse, SyncInfo } from "@/lib/types";
+import type { ExportFormat, OrderLine, PanelMode, SavedOrderDTO, StorageItem, StorageResponse, SyncInfo } from "@/lib/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNotify } from "../providers/NotificationProvider";
-import { useTerminal } from "../providers/TerminalProvider";
-import { Modal } from "../ui/Modal";
 import { OrderBuilder } from "./OrderBuilder";
 import { ReportPreviewModal } from "./ReportPreviewModal";
 import { StorageMonitor } from "./StorageMonitor";
 
 type Target = "storage" | "order";
-
-interface Notice {
-  title: string;
-  message: string;
-  tone: "info" | "warning";
-}
 
 async function readError(res: Response): Promise<string> {
   try {
@@ -31,7 +23,6 @@ async function readError(res: Response): Promise<string> {
 
 export function OrdersWorkspace() {
   const notify = useNotify();
-  const { markSync, markOffline, stockpiles, showStockpile, showConstructor } = useTerminal();
 
   const [storage, setStorage] = useState<StorageItem[]>([]);
   const [storageSync, setStorageSync] = useState<SyncInfo | null>(null);
@@ -41,10 +32,10 @@ export function OrdersWorkspace() {
   const [order, setOrder] = useState<OrderLine[]>([]);
   const [orderHydrated, setOrderHydrated] = useState(false);
   const [savedOrders, setSavedOrders] = useState<SavedOrderDTO[]>([]);
+  const [savedOrdersLoading, setSavedOrdersLoading] = useState(true);
 
   const [leftMode, setLeftMode] = useState<PanelMode>("export");
   const [rightMode, setRightMode] = useState<PanelMode>("export");
-  const [notice, setNotice] = useState<Notice | null>(null);
   const [pasteTarget, setPasteTarget] = useState<Target | null>(null);
   const [pasteText, setPasteText] = useState("");
   const [preview, setPreview] = useState<{ rows: ExportRow[] } | null>(null);
@@ -52,10 +43,19 @@ export function OrdersWorkspace() {
 
   const textInput = useRef<HTMLInputElement>(null);
   const xlsxInput = useRef<HTMLInputElement>(null);
-  const savInput = useRef<HTMLInputElement>(null);
   const fileTarget = useRef<Target>("storage");
 
-  // ── начальная загрузка ─────────────────────────────────────────
+  const refreshSavedOrders = useCallback(async () => {
+    try {
+      const res = await fetch("/api/orders", { cache: "no-store" });
+      if (res.ok) setSavedOrders(((await res.json()) as { orders: SavedOrderDTO[] }).orders);
+    } catch {
+      /* ignore — журнал остаётся прежним, повтор запроса произойдёт при следующем действии */
+    } finally {
+      setSavedOrdersLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.order);
@@ -72,20 +72,16 @@ export function OrdersWorkspace() {
         const data = (await res.json()) as StorageResponse;
         setStorage(data.items);
         setStorageSync(data.lastSync);
-        markSync();
       } catch {
-        markOffline();
+        notify({ title: "БАЗА ДАННЫХ", message: "Не удалось загрузить склад — проверьте подключение.", tone: "danger" });
       } finally {
         setStorageLoading(false);
       }
-      try {
-        const res = await fetch("/api/orders", { cache: "no-store" });
-        if (res.ok) setSavedOrders(((await res.json()) as { orders: SavedOrderDTO[] }).orders);
-      } catch {
-        /* ignore */
-      }
     })();
-  }, [markSync, markOffline]);
+
+    // Общий архив рапортов — загружается независимо от собственного черновика заказа.
+    void refreshSavedOrders();
+  }, [notify, refreshSavedOrders]);
 
   useEffect(() => {
     if (!orderHydrated) return;
@@ -96,11 +92,6 @@ export function OrdersWorkspace() {
     }
   }, [order, orderHydrated]);
 
-  useEffect(() => {
-    if (stockpiles.length) setReportMeta((m) => (m.region === "Clanshead Valley" ? { ...m, region: stockpiles[0].region } : m));
-  }, [stockpiles]);
-
-  // ── склад ─────────────────────────────────────────────────────
   const saveStorage = useCallback(
     async (items: StorageItem[], source: string) => {
       setStorageBusy(true);
@@ -115,30 +106,28 @@ export function OrdersWorkspace() {
         const data = (await res.json()) as StorageResponse;
         setStorage(data.items);
         setStorageSync(data.lastSync);
-        markSync();
-        notify({ title: "СИНХРОНИЗАЦИЯ", message: `Успешно загружено предметов: ${data.items.length}. Данные склада записаны в базу штаба.`, tone: "success" });
+        notify({ title: "СИНХРОНИЗАЦИЯ", message: `Успешно загружено предметов: ${data.items.length}.`, tone: "success" });
       } catch (e) {
-        markOffline();
         notify({ title: "БАЗА ДАННЫХ", message: `Данные показаны локально, но не сохранены: ${(e as Error).message}`, tone: "danger" });
       } finally {
         setStorageBusy(false);
       }
     },
-    [markSync, markOffline, notify],
+    [notify],
   );
 
   const importLines = useCallback(
-    (lines: ParsedLine[], target: Target, source: string) => {
+    (lines: ParsedLine[], target: Target) => {
       if (!lines.length) {
         notify({
           title: "ОШИБКА ФОРМАТА",
-          message: "Не удалось распознать данные сканера. Убедитесь, что текст в формате:\n\nНазвание Предмета, Количество\nили\nНазвание Предмета -> Количество",
+          message: "Не удалось распознать данные. Формат: «Название, Количество» или «Название -> Количество».",
           tone: "danger",
           ttl: 8000,
         });
         return;
       }
-      if (target === "storage") void saveStorage(toStorageItems(lines), source);
+      if (target === "storage") void saveStorage(toStorageItems(lines), "manual");
       else {
         setOrder(toOrderLines(lines));
         notify({ title: "ИМПОРТ ЗАКАЗА", message: `В конструктор загружено позиций: ${lines.length}`, tone: "success" });
@@ -155,7 +144,7 @@ export function OrdersWorkspace() {
           notify({ title: "БУФЕР ОБМЕНА", message: "Буфер обмена пуст или не содержит текстовых данных!", tone: "warning" });
           return;
         }
-        importLines(parseInventoryPayload(text), target, "clipboard");
+        importLines(parseInventoryPayload(text), target);
       } catch {
         setPasteText("");
         setPasteTarget(target);
@@ -167,41 +156,15 @@ export function OrdersWorkspace() {
   const onTextFile = async (file: File | undefined) => {
     if (!file) return;
     const text = await file.text();
-    importLines(parseInventoryPayload(text), fileTarget.current, file.name.toLowerCase().endsWith(".json") ? "json" : "txt");
+    importLines(parseInventoryPayload(text), fileTarget.current);
   };
 
   const onXlsxFile = async (file: File | undefined) => {
     if (!file) return;
     try {
-      importLines(await importXlsx(file), fileTarget.current, "xlsx");
+      importLines(await importXlsx(file), fileTarget.current);
     } catch (e) {
       notify({ title: "XLSX", message: `Сбой чтения таблицы: ${(e as Error).message}`, tone: "danger" });
-    }
-  };
-
-  const onSavFile = async (file: File | undefined) => {
-    if (!file) return;
-    setStorageBusy(true);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch("/api/scan", { method: "POST", body: form });
-      if (!res.ok) throw new Error(await readError(res));
-      const data = (await res.json()) as ScanResponse;
-      if (!data.items.length) {
-        notify({ title: "СКАНЕР", message: `В файле ${data.fileName} (${(data.fileSize / 1024).toFixed(0)} КБ) не найдено предметов из реестра кодов.`, tone: "warning" });
-        return;
-      }
-      notify({
-        title: "СКАНЕР MAPDATA",
-        message: `${data.fileName}: распознано позиций — ${data.matchedCodes}${data.strict ? "" : " (мягкий режим поиска)"}.`,
-        tone: "info",
-      });
-      await saveStorage(data.items, "scan");
-    } catch (e) {
-      notify({ title: "СКАНЕР", message: `Сбой обработки файла: ${(e as Error).message}`, tone: "danger" });
-    } finally {
-      setStorageBusy(false);
     }
   };
 
@@ -213,7 +176,6 @@ export function OrdersWorkspace() {
     }
   };
 
-  // ── заказ ─────────────────────────────────────────────────────
   const addToOrder = (line: OrderLine) => {
     setOrder((prev) => {
       const existing = prev.find((l) => l.name === line.name);
@@ -221,8 +183,7 @@ export function OrdersWorkspace() {
       return prev.map((l) => (l.name === line.name ? (l.unit === line.unit ? { ...l, count: l.count + line.count } : { ...line }) : l));
     });
   };
-  const adjustLine = (name: string, delta: number) =>
-    setOrder((prev) => prev.map((l) => (l.name === name ? { ...l, count: Math.max(1, l.count + delta) } : l)));
+  const adjustLine = (name: string, delta: number) => setOrder((prev) => prev.map((l) => (l.name === name ? { ...l, count: Math.max(1, l.count + delta) } : l)));
   const removeLine = (name: string) => setOrder((prev) => prev.filter((l) => l.name !== name));
   const clearOrder = () => {
     setOrder([]);
@@ -239,8 +200,7 @@ export function OrdersWorkspace() {
       if (!res.ok) throw new Error(await readError(res));
       const data = (await res.json()) as { orders: SavedOrderDTO[] };
       setSavedOrders(data.orders);
-      markSync();
-      notify({ title: "РАПОРТ ПРИНЯТ", message: `Заказ на ${order.length} позиций сохранён в архиве штаба.`, tone: "success" });
+      notify({ title: "РАПОРТ ПРИНЯТ", message: `Заказ на ${order.length} позиций сохранён в общем архиве штаба.`, tone: "success" });
       return true;
     } catch (e) {
       notify({ title: "РАПОРТ", message: `Штаб не принял рапорт: ${(e as Error).message}`, tone: "danger" });
@@ -253,20 +213,20 @@ export function OrdersWorkspace() {
       const res = await fetch(`/api/orders/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(await readError(res));
       setSavedOrders((prev) => prev.filter((o) => o.id !== id));
+      notify({ title: "АРХИВ", message: "Рапорт удалён из журнала.", tone: "info" });
     } catch (e) {
       notify({ title: "АРХИВ", message: (e as Error).message, tone: "danger" });
     }
   };
 
-  // ── режимы и экспорт ─────────────────────────────────────────
   const toggleMode = (side: Target) => {
     const current = side === "storage" ? leftMode : rightMode;
     const next: PanelMode = current === "export" ? "import" : "export";
     (side === "storage" ? setLeftMode : setRightMode)(next);
-    setNotice(
+    notify(
       next === "import"
-        ? { title: "⚙️ СИСТЕМА: ИМПОРТ", message: "ВНИМАНИЕ: Панель переключена в режим ИМПОРТА данных.\nНижние тактические клавиши теперь ожидают чтение внешних файлов.", tone: "warning" }
-        : { title: "📡 СИСТЕМА: ЭКСПОРТ", message: "УВЕДОМЛЕНИЕ: Панель переключена в режим ЭКСПОРТА данных.\nДоступна выгрузка рапортов в форматы TXT, XLSX и графику PNG.", tone: "info" },
+        ? { title: "⚙️ РЕЖИМ ИМПОРТА", message: "Панель переключена в режим импорта — нижние кнопки теперь читают внешние файлы.", tone: "warning" }
+        : { title: "📡 РЕЖИМ ЭКСПОРТА", message: "Панель переключена в режим экспорта — доступна выгрузка рапортов в TXT, XLSX и PNG.", tone: "info" },
     );
   };
 
@@ -302,7 +262,7 @@ export function OrdersWorkspace() {
       const [first] = await renderReportPages(rows, meta);
       const blob = first ? await canvasToBlob(first) : null;
       const ok = blob ? await copyBlobToClipboard(blob) : false;
-      if (ok) notify({ title: "FAST SHARE", message: "Первая страница отчёта скопирована в буфер обмена — вставляйте в Discord через Ctrl+V!", tone: "success" });
+      if (ok) notify({ title: "FAST SHARE", message: "Первая страница отчёта скопирована в буфер обмена!", tone: "success" });
       else {
         const okText = await copyText(buildTxt(rows));
         notify(
@@ -314,29 +274,24 @@ export function OrdersWorkspace() {
     }
   };
 
-  const stockpileIsFullWidth = showStockpile && !showConstructor;
-  const constructorIsFullWidth = showConstructor && !showStockpile;
-
   return (
     <div className="tab-fade flex min-h-full flex-col gap-2.5 md:gap-3">
       <div className="grid min-h-0 flex-1 gap-2.5 md:gap-3 lg:grid-cols-2">
-        <div className={`${showStockpile ? "block" : "hidden"} min-w-0 lg:min-h-0 ${stockpileIsFullWidth ? "lg:col-span-2" : ""}`}>
+        <div className="min-w-0">
           <StorageMonitor
             items={storage}
             loading={storageLoading}
             busy={storageBusy}
             sync={storageSync}
             mode={leftMode}
-            isFullWidth={stockpileIsFullWidth}
             onToggleMode={() => toggleMode("storage")}
             onAction={(fmt) => void handleAction("storage", fmt)}
             onPickTextFile={() => pickFile(textInput, "storage")}
             onClipboard={() => void readClipboard("storage")}
-            onPickSav={() => pickFile(savInput, "storage")}
             onClear={() => void saveStorage([], "manual")}
           />
         </div>
-        <div className={`${showConstructor ? "block" : "hidden"} min-w-0 lg:min-h-0 ${constructorIsFullWidth ? "lg:col-span-2" : ""}`}>
+        <div className="min-w-0">
           <OrderBuilder
             order={order}
             onAdd={addToOrder}
@@ -344,6 +299,7 @@ export function OrdersWorkspace() {
             onAdjust={adjustLine}
             onClear={clearOrder}
             savedOrders={savedOrders}
+            savedOrdersLoading={savedOrdersLoading}
             onSave={saveOrder}
             onLoadSaved={(o) => {
               setOrder(o.items);
@@ -351,7 +307,6 @@ export function OrdersWorkspace() {
             }}
             onDeleteSaved={(id) => void deleteSaved(id)}
             mode={rightMode}
-            isFullWidth={constructorIsFullWidth}
             onToggleMode={() => toggleMode("order")}
             onAction={(fmt) => void handleAction("order", fmt)}
             busy={storageBusy}
@@ -359,55 +314,36 @@ export function OrdersWorkspace() {
         </div>
       </div>
 
-      {/* скрытые input'ы */}
       <input ref={textInput} type="file" accept=".json,.txt,application/json,text/plain" className="hidden" onChange={(e) => void onTextFile(e.target.files?.[0])} />
       <input ref={xlsxInput} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => void onXlsxFile(e.target.files?.[0])} />
-      <input ref={savInput} type="file" accept=".sav,application/octet-stream" className="hidden" onChange={(e) => void onSavFile(e.target.files?.[0])} />
 
-      {/* Тактическое уведомление смены режима */}
-      <Modal
-        open={!!notice}
-        onClose={() => setNotice(null)}
-        title={notice?.title ?? ""}
-        icon={iconPath("military-base")}
-        widthClass="max-w-md"
-        backdropImage={backgroundAsset("home").src}
-        footer={
-          <div className="flex justify-center">
-            <button className="btn btn-primary min-w-[160px]" onClick={() => setNotice(null)} autoFocus>
-              ПРИНЯТО
-            </button>
+      {pasteTarget && (
+        <div className="modal-backdrop fixed inset-0 z-[85] flex items-center justify-center p-3" onMouseDown={(e) => e.target === e.currentTarget && setPasteTarget(null)}>
+          <div className="panel panel-corners w-full max-w-lg rounded-md p-4">
+            <h2 className="panel-title mb-2">Вставка данных скирнера</h2>
+            <p className="hud-label text-muted">Браузер не дал прямой доступ к буферу. Вставьте текст вручную (Ctrl+V):</p>
+            <textarea
+              className="field field-mono mt-2 h-48 w-full resize-y text-xs"
+              placeholder={"Название предмета, 50\nНазвание предмета -> 12 ящ.\nНазвание предмета: 7"}
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              autoFocus
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button className="btn" onClick={() => setPasteTarget(null)}>Отмена</button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  if (pasteTarget) importLines(parseInventoryPayload(pasteText), pasteTarget);
+                  setPasteTarget(null);
+                }}
+              >
+                Распознать
+              </button>
+            </div>
           </div>
-        }
-      >
-        <p className="console-log whitespace-pre-line rounded px-4 py-4 text-center text-[0.8rem] leading-relaxed" style={{ color: notice?.tone === "warning" ? "#fcd34d" : "#d9f99d" }}>
-          {notice?.message}
-        </p>
-      </Modal>
-
-      {/* Ручная вставка (fallback для Clipboard API) */}
-      <Modal open={!!pasteTarget} onClose={() => setPasteTarget(null)} title="Вставка данных сканера" icon={iconPath("log-file")} widthClass="max-w-lg">
-        <p className="hud-label text-muted">Браузер не дал прямой доступ к буферу. Вставьте текст вручную (Ctrl+V):</p>
-        <textarea
-          className="field field-mono mt-2 h-48 w-full resize-y text-xs"
-          placeholder={"Название предмета, 50\nНазвание предмета -> 12 ящ.\nНазвание предмета: 7"}
-          value={pasteText}
-          onChange={(e) => setPasteText(e.target.value)}
-          autoFocus
-        />
-        <div className="mt-3 flex justify-end gap-2">
-          <button className="btn" onClick={() => setPasteTarget(null)}>Отмена</button>
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              if (pasteTarget) importLines(parseInventoryPayload(pasteText), pasteTarget, "clipboard");
-              setPasteTarget(null);
-            }}
-          >
-            Распознать
-          </button>
         </div>
-      </Modal>
+      )}
 
       <ReportPreviewModal open={!!preview} onClose={() => setPreview(null)} rows={preview?.rows ?? []} meta={reportMeta} onMetaChange={setReportMeta} />
     </div>

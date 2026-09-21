@@ -1,6 +1,5 @@
 "use client";
 
-import { backgroundAsset } from "./constants";
 import * as XLSX from "xlsx";
 import { fileStamp, formatDateTime } from "./time";
 import type { OrderUnit } from "./types";
@@ -61,16 +60,12 @@ export async function importXlsx(file: File): Promise<ParsedLine[]> {
     if (name && Number.isFinite(count) && count > 0) out.push({ name, count: Math.round(count), unit });
   }
   if (!out.length) {
-    // fallback: лист как текст
     const csv = XLSX.utils.sheet_to_csv(sheet);
     return parseInventoryText(csv);
   }
   return out;
 }
 
-// ─────────────────────────────────────────────────────────────
-// PNG: тактические страницы отчёта (650x1000, до 14 позиций)
-// ─────────────────────────────────────────────────────────────
 export interface ReportMeta {
   title: string;
   region: string;
@@ -82,39 +77,13 @@ const PAGE_W = 650;
 const PAGE_H = 1000;
 const ITEMS_PER_PAGE = 14;
 
-let textureCache: HTMLImageElement | null = null;
-function loadTexture(): Promise<HTMLImageElement | null> {
-  if (textureCache) return Promise.resolve(textureCache);
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      textureCache = img;
-      resolve(img);
-    };
-    img.onerror = () => resolve(null);
-    img.src = backgroundAsset("report").src;
-  });
-}
-
-function drawPage(
-  ctx: CanvasRenderingContext2D,
-  texture: HTMLImageElement | null,
-  rows: ExportRow[],
-  page: number,
-  total: number,
-  meta: ReportMeta,
-) {
-  ctx.fillStyle = "#1f2321";
+function drawPage(ctx: CanvasRenderingContext2D, rows: ExportRow[], page: number, total: number, meta: ReportMeta) {
+  const gradient = ctx.createLinearGradient(0, 0, 0, PAGE_H);
+  gradient.addColorStop(0, "#111812");
+  gradient.addColorStop(1, "#090d0b");
+  ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, PAGE_W, PAGE_H);
-  if (texture) {
-    const scale = Math.max(PAGE_W / texture.width, PAGE_H / texture.height);
-    const w = texture.width * scale;
-    const h = texture.height * scale;
-    ctx.drawImage(texture, (PAGE_W - w) / 2, (PAGE_H - h) / 2, w, h);
-    ctx.fillStyle = "rgba(10,14,11,0.72)";
-    ctx.fillRect(0, 0, PAGE_W, PAGE_H);
-  }
-  // рамка
+
   ctx.strokeStyle = "rgba(163,230,53,0.55)";
   ctx.lineWidth = 2;
   ctx.strokeRect(18, 18, PAGE_W - 36, PAGE_H - 36);
@@ -171,7 +140,6 @@ function drawPage(
 }
 
 export async function renderReportPages(rows: ExportRow[], meta: ReportMeta): Promise<HTMLCanvasElement[]> {
-  const texture = await loadTexture();
   const chunks: ExportRow[][] = [];
   for (let i = 0; i < rows.length; i += ITEMS_PER_PAGE) chunks.push(rows.slice(i, i + ITEMS_PER_PAGE));
   if (!chunks.length) chunks.push([]);
@@ -180,7 +148,7 @@ export async function renderReportPages(rows: ExportRow[], meta: ReportMeta): Pr
     canvas.width = PAGE_W;
     canvas.height = PAGE_H;
     const ctx = canvas.getContext("2d");
-    if (ctx) drawPage(ctx, texture, chunk, idx + 1, chunks.length, meta);
+    if (ctx) drawPage(ctx, chunk, idx + 1, chunks.length, meta);
     return canvas;
   });
 }

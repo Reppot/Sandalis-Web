@@ -10,6 +10,8 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
+      - key: NEXT_PUBLIC_VIDEO_URL
+        sync: false
       - key: NODE_VERSION
         value: "22"
       - key: NODE_ENV
