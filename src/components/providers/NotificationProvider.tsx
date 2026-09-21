@@ -52,13 +52,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   return (
     <NotificationContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed right-3 bottom-4 z-[90] flex w-[min(380px,calc(100vw-1.5rem))] flex-col gap-2">
+      <div className="pointer-events-none fixed right-3 bottom-20 z-[90] flex w-[min(380px,calc(100vw-1.5rem))] flex-col gap-2 md:bottom-4">
         {items.map((n) => {
           const t = TONE_STYLES[n.tone];
           return (
             <div
               key={n.id}
-              className="toast pointer-events-auto rounded-md border border-white/10 bg-[#0d120e] px-4 py-3 shadow-lg"
+              className="toast panel pointer-events-auto px-4 py-3"
               style={{ borderLeft: `4px solid ${t.border}`, boxShadow: `0 10px 30px rgba(0,0,0,0.45), 0 0 18px ${t.glow}` }}
               role="status"
             >

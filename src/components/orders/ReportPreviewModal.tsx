@@ -1,5 +1,6 @@
 "use client";
 
+import { iconPath } from "@/lib/constants";
 import { canvasToBlob, copyBlobToClipboard, downloadBlob, renderReportPages, type ExportRow, type ReportMeta } from "@/lib/exporters";
 import { fileStamp } from "@/lib/time";
 import { useEffect, useState } from "react";
@@ -22,9 +23,7 @@ export function ReportPreviewModal({ open, onClose, rows, meta, onMetaChange }: 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    const timer = window.setTimeout(() => {
-      if (!cancelled) setRendering(true);
-    }, 0);
+    setRendering(true);
     void renderReportPages(rows, meta).then((c) => {
       if (!cancelled) {
         setPages(c);
@@ -33,7 +32,6 @@ export function ReportPreviewModal({ open, onClose, rows, meta, onMetaChange }: 
     });
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
     };
   }, [open, rows, meta]);
 
@@ -62,7 +60,7 @@ export function ReportPreviewModal({ open, onClose, rows, meta, onMetaChange }: 
       open={open}
       onClose={onClose}
       title={`Графический рапорт • ${rows.length} поз. • ${pages.length || "…"} стр.`}
-      icon="🖼️"
+      icon={iconPath("png-file")}
       widthClass="max-w-4xl"
       footer={
         <div className="flex flex-wrap items-center justify-between gap-2">

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isValidToken, SESSION_COOKIE, SESSION_EXPIRY_COOKIE } from "@/lib/auth";
+import { findAccessProfile } from "@/lib/auth-profiles";
+
+const SESSION_COOKIE = "sindaris_session_token";
+const SESSION_EXPIRY_COOKIE = "sindaris_session_expires_at";
 
 function isPublicPath(pathname: string): boolean {
   return (
@@ -7,7 +10,12 @@ function isPublicPath(pathname: string): boolean {
     pathname === "/api/auth/login" ||
     pathname === "/api/health" ||
     pathname === "/favicon.ico" ||
-    pathname.startsWith("/_next/")
+    pathname === "/clan-logo.png" ||
+    pathname.startsWith("/_next/") ||
+    pathname.startsWith("/FoxholeWikiPhotos/") ||
+    pathname.startsWith("/icons/") ||
+    pathname.startsWith("/bg/") ||
+    pathname.startsWith("/Videos/")
   );
 }
 
@@ -22,14 +30,10 @@ export function proxy(request: NextRequest) {
   const expiryRaw = request.cookies.get(SESSION_EXPIRY_COOKIE)?.value ?? "0";
   const sessionExpiresAt = Number(expiryRaw);
   const sessionIsFresh = Number.isFinite(sessionExpiresAt) && sessionExpiresAt > Date.now();
-  const authorized = sessionIsFresh && isValidToken(sessionToken);
+  const authorized = Boolean(findAccessProfile(sessionToken) && sessionIsFresh);
 
   if (authorized) {
     return NextResponse.next();
-  }
-
-  if (pathname.startsWith("/api/")) {
-    return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
   }
 
   const loginUrl = new URL("/", request.url);

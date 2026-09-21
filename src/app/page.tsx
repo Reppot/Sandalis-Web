@@ -1,7 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -42,19 +43,30 @@ export default function LoginPage() {
 
   return (
     <main className="auth-screen">
-      <div className="auth-backdrop" aria-hidden />
-      <section className="auth-panel">
+      <video
+        autoPlay
+        loop
+        muted
+        playsInline
+        preload="auto"
+        className="absolute inset-0 z-0 h-full w-full object-cover"
+        src="/Videos/Video Project.mp4"
+        aria-hidden
+      />
+      <div className="absolute inset-0 z-0 bg-black/60 backdrop-blur-[2px]" aria-hidden />
+
+      <section className="auth-panel panel panel-corners relative z-10">
+        <div className="auth-scanline" aria-hidden />
         <div className="auth-header">
-          <div className="auth-crest">SD</div>
+          <Image src="/clan-logo.png" alt="Герб клана SINDARIS" width={180} height={230} priority className="auth-logo" />
           <h1 className="auth-title">SINDARIS Terminal</h1>
-          <p className="auth-subtitle">Logistics Overwatch Control • Foxhole</p>
         </div>
 
         <div className="auth-rule" />
 
         <form className="auth-form" onSubmit={submit}>
           <label htmlFor="access-token" className="auth-label">
-            ВВЕДИТЕ КЛЮЧ ДОСТУПА КЛАНА (TOKEN)
+            ВВЕДИТЕ КЛЮЧ ДОСТУПА СИНДИКАТА (TOKEN)
           </label>
           <div className={`auth-input-wrap ${error ? "auth-input-error" : ""}`}>
             <span className="auth-prompt" aria-hidden>&gt;_</span>

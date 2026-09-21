@@ -1,4 +1,4 @@
-﻿# scripts/snapshot.ps1 — пересобирает SNAP_*.md из текущего кода
+# scripts/snapshot.ps1 — пересобирает SNAP_*.md из текущего кода
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot -Parent)
 

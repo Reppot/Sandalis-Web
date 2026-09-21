@@ -1,5 +1,6 @@
 "use client";
 
+import { iconPath } from "@/lib/constants";
 import { formatDateTime } from "@/lib/time";
 import type { SavedOrderDTO } from "@/lib/types";
 import { useMemo, useState } from "react";
@@ -41,7 +42,7 @@ export function AllReportsModal({ open, onClose, orders, loading, onLoad, onDele
       open={open}
       onClose={onClose}
       title={`📋 Логи заказов • Все рапорты штаба (${orders.length})`}
-      icon="📋"
+      icon={iconPath("log-file")}
       widthClass="max-w-3xl"
       footer={
         <div className="flex items-center justify-between gap-2">

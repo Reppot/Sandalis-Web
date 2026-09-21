@@ -4,17 +4,15 @@ import { eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
-export async function DELETE(_req: Request, context: { params: Promise<{ id: string }> }) {
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id: rawId } = await params;
+  const id = Number(rawId);
+  if (!Number.isInteger(id)) return Response.json({ error: "Некорректный ID" }, { status: 400 });
   try {
-    const { id } = await context.params;
-    const orderId = Number(id);
-    if (!Number.isFinite(orderId)) {
-      return Response.json({ error: "Некорректный идентификатор рапорта" }, { status: 400 });
-    }
-    await db.delete(orders).where(eq(orders.id, orderId));
+    await db.delete(orders).where(eq(orders.id, id));
     return Response.json({ ok: true });
   } catch (error) {
-    console.error("[SIND] DELETE /api/orders/[id]", error);
+    console.error("DELETE /api/orders/:id", error);
     return Response.json({ error: "Не удалось удалить рапорт" }, { status: 500 });
   }
 }

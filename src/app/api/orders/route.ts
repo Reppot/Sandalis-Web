@@ -5,9 +5,8 @@ import { asc, desc, inArray } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
-/** Возвращает ВСЕ сохранённые рапорты штаба — общий архив, доступный любому участнику. */
 async function listOrders(): Promise<SavedOrderDTO[]> {
-  const rows = await db.select().from(orders).orderBy(desc(orders.createdAt)).limit(200);
+  const rows = await db.select().from(orders).orderBy(desc(orders.createdAt)).limit(30);
   if (!rows.length) return [];
   const items = await db
     .select()
@@ -29,7 +28,7 @@ export async function GET() {
   try {
     return Response.json({ orders: await listOrders() });
   } catch (error) {
-    console.error("[SIND] GET /api/orders", error);
+    console.error("GET /api/orders", error);
     return Response.json({ error: "Сбой чтения архива рапортов" }, { status: 500 });
   }
 }
@@ -51,7 +50,7 @@ export async function POST(req: Request) {
     await db.insert(orderItems).values(lines.map((l) => ({ ...l, orderId: order.id })));
     return Response.json({ orders: await listOrders(), createdId: order.id }, { status: 201 });
   } catch (error) {
-    console.error("[SIND] POST /api/orders", error);
+    console.error("POST /api/orders", error);
     return Response.json({ error: "Не удалось сохранить рапорт" }, { status: 500 });
   }
 }
