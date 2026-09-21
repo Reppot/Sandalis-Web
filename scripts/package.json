@@ -1,0 +1,1 @@
+"snapshot": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/snapshot.ps1"
