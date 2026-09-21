@@ -3,3 +3,6 @@
 .env
 notepad .gitignore
 public/Videos/
+SNAP_*.md
+Instruction.md
+PROJECT_SNAPSHOT.md
