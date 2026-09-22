@@ -1,44 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findAccessProfile } from "@/lib/auth-profiles";
+import { SESSION_COOKIE, validateSessionById } from "@/lib/auth/session";
 
-const SESSION_COOKIE = "sindaris_session_token";
-const SESSION_EXPIRY_COOKIE = "sindaris_session_expires_at";
-
+/** Публичные маршруты: вход, health и статика. Всё остальное — только с валидной сессией в БД. */
 function isPublicPath(pathname: string): boolean {
-  return (
+  if (
     pathname === "/" ||
     pathname === "/api/auth/login" ||
+    pathname === "/api/auth/logout" ||
+    pathname === "/api/auth/me" ||
+    pathname.startsWith("/api/auth/discord/") ||
     pathname === "/api/health" ||
-    pathname === "/favicon.ico" ||
-    pathname === "/clan-logo.png" ||
-    pathname.startsWith("/_next/") ||
-    pathname.startsWith("/FoxholeWikiPhotos/") ||
-    pathname.startsWith("/icons/") ||
-    pathname.startsWith("/bg/") ||
-    pathname.startsWith("/Videos/")
-  );
+    pathname.startsWith("/_next/")
+  ) {
+    return true;
+  }
+  // Статические файлы из public/ (иконки, фоны, видео, gif и т.д.) — по расширению.
+  return /\.[a-z0-9]{2,5}$/i.test(pathname);
 }
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 
-  const sessionToken = request.cookies.get(SESSION_COOKIE)?.value ?? "";
-  const expiryRaw = request.cookies.get(SESSION_EXPIRY_COOKIE)?.value ?? "0";
-  const sessionExpiresAt = Number(expiryRaw);
-  const sessionIsFresh = Number.isFinite(sessionExpiresAt) && sessionExpiresAt > Date.now();
-  const authorized = Boolean(findAccessProfile(sessionToken) && sessionIsFresh);
+  const sessionId = request.cookies.get(SESSION_COOKIE)?.value;
+  let authorized = false;
+  if (sessionId) {
+    try {
+      authorized = Boolean(await validateSessionById(sessionId));
+    } catch (error) {
+      console.error("[SIND][PROXY] session check failed:", error instanceof Error ? error.message : error);
+    }
+  }
 
   if (authorized) {
     return NextResponse.next();
   }
 
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const loginUrl = new URL("/", request.url);
-  if (pathname !== "/") loginUrl.searchParams.set("next", pathname);
-  return NextResponse.redirect(loginUrl);
+  loginUrl.searchParams.set("next", pathname);
+  const response = NextResponse.redirect(loginUrl);
+  // Протухшие cookie чистим, чтобы TerminalShell не зациклился.
+  response.cookies.delete(SESSION_COOKIE);
+  response.cookies.delete("sindaris_session_expires_at");
+  return response;
 }
 
 export const config = {

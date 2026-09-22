@@ -20,3 +20,13 @@ services:
         sync: false
       - key: ACCESS_TOKENS_JSON
         sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DISCORD_GUILD_ID
+        sync: false
+      - key: DISCORD_REDIRECT_URI
+        sync: false
+      - key: NEXT_PUBLIC_VIDEO_URL
+        sync: false

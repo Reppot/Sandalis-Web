@@ -55,7 +55,9 @@ export function CabinetWorkspace() {
 
   useEffect(() => {
     if (!expiresAt) return;
-    const timeout = window.setTimeout(() => router.replace("/"), Math.max(0, expiresAt - Date.now()));
+    // setTimeout принимает максимум 2^31-1 мс (~24.8 дня); сессия живёт 30 дней — ограничиваем задержку.
+    const delay = Math.min(Math.max(0, expiresAt - Date.now()), 2_147_483_647);
+    const timeout = window.setTimeout(() => router.replace("/"), delay);
     return () => window.clearTimeout(timeout);
   }, [expiresAt, router]);
 

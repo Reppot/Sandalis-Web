@@ -1,8 +1,15 @@
 import { timingSafeEqual } from "node:crypto";
 
-export const SESSION_COOKIE = "sindaris_session_token";
-export const SESSION_EXPIRY_COOKIE = "sindaris_session_expires_at";
-export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 8; // 8 часов — единая точка настройки срока сессии.
+/**
+ * Единая точка констант сессии. С задачи B1-a сессии хранятся в БД (таблица sessions),
+ * cookie содержит UUID сессии, а не сам токен. См. src/lib/auth/session.ts.
+ */
+export {
+  SESSION_COOKIE,
+  SESSION_EXPIRY_COOKIE,
+  SESSION_MAX_AGE_SECONDS,
+  SESSION_MAX_AGE_DAYS,
+} from "@/lib/auth/session";
 
 function constantTimeEqual(left: string, right: string): boolean {
   const a = Buffer.from(left, "utf8");
@@ -10,7 +17,7 @@ function constantTimeEqual(left: string, right: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** Список валидных ключей доступа. ACCESS_TOKENS_JSON (массив строк) или одиночный ACCESS_TOKEN. */
+/** Список валидных резервных ключей: ACCESS_TOKENS_JSON (строки или {token}) или одиночный ACCESS_TOKEN. */
 function getValidTokens(): string[] {
   const tokens = new Set<string>();
   const rawList = process.env.ACCESS_TOKENS_JSON?.trim();
@@ -18,7 +25,13 @@ function getValidTokens(): string[] {
     try {
       const parsed = JSON.parse(rawList) as unknown;
       if (Array.isArray(parsed)) {
-        for (const entry of parsed) if (typeof entry === "string" && entry.trim()) tokens.add(entry.trim());
+        for (const entry of parsed) {
+          if (typeof entry === "string" && entry.trim()) tokens.add(entry.trim());
+          else if (entry && typeof entry === "object" && typeof (entry as { token?: unknown }).token === "string") {
+            const t = ((entry as { token: string }).token ?? "").trim();
+            if (t) tokens.add(t);
+          }
+        }
       }
     } catch {
       // некорректный JSON не должен ломать одиночный ACCESS_TOKEN

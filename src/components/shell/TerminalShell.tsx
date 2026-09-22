@@ -28,7 +28,9 @@ export function TerminalShell({ children }: { children: ReactNode }) {
       return;
     }
 
-    const timer = window.setTimeout(() => window.location.replace("/"), Math.max(0, expiresAt - Date.now()));
+    // setTimeout принимает максимум 2^31-1 мс (~24.8 дня); сессия живёт 30 дней — ограничиваем задержку.
+    const delay = Math.min(Math.max(0, expiresAt - Date.now()), 2_147_483_647);
+    const timer = window.setTimeout(() => window.location.replace("/"), delay);
     return () => window.clearTimeout(timer);
   }, [isLoginRoute]);
 
