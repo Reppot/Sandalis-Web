@@ -2,6 +2,7 @@ Directory structure:
 └── reppot-sandalis-web/
     ├── drizzle.config.ts
     ├── eslint.config.mjs
+    ├── Instruction.md
     ├── next-env.d.ts
     ├── next.config.ts
     ├── package.json
@@ -386,11 +387,18 @@ Directory structure:
         │   ├── page.tsx
         │   ├── api/
         │   │   ├── auth/
+        │   │   │   ├── discord/
+        │   │   │   │   ├── authorize/
+        │   │   │   │   │   └── route.ts
+        │   │   │   │   └── callback/
+        │   │   │   │       └── route.ts
         │   │   │   ├── login/
         │   │   │   │   └── route.ts
         │   │   │   ├── logout/
         │   │   │   │   └── route.ts
-        │   │   │   └── me/
+        │   │   │   ├── me/
+        │   │   │   │   └── route.ts
+        │   │   │   └── sessions/
         │   │   │       └── route.ts
         │   │   ├── health/
         │   │   │   └── route.ts
@@ -409,6 +417,8 @@ Directory structure:
         │   ├── cabinet/
         │   │   └── page.tsx
         │   ├── codes/
+        │   │   └── page.tsx
+        │   ├── login/
         │   │   └── page.tsx
         │   ├── map/
         │   │   └── page.tsx
@@ -465,6 +475,7 @@ Directory structure:
             ├── auth.ts
             ├── code-base.ts
             ├── constants.ts
+            ├── discord-roles.ts
             ├── exporters.ts
             ├── foxhole-data.ts
             ├── item-icon-overrides.ts
@@ -472,6 +483,10 @@ Directory structure:
             ├── parsers.ts
             ├── time.ts
             ├── types.ts
+            ├── auth/
+            │   ├── rate-limit.ts
+            │   ├── session.ts
+            │   └── tokens.ts
             └── server/
                 └── stockpile-repo.ts
 
@@ -514,11 +529,220 @@ export default defineConfig([
 
 
 ================================================
+FILE: Instruction.md
+================================================
+# SIND-site — инструкция для ИИ-ассистента и владельца
+
+> Прочитай этот файл целиком перед любыми действиями с проектом.
+> Если что-то здесь противоречит твоим предположениям — прав этот файл.
+
+---
+
+## 1. Что это за проект (TL;DR)
+
+Веб-сайт клана для игры Foxhole: заказы на производство, склады, таймеры, кодовая база предметов, карта, тренировки.
+
+| Параметр | Значение |
+|---|---|
+| Фреймворк | **Next.js 16.2.6** (App Router, Turbopack) |
+| UI | React 19, Tailwind CSS 4 (`@tailwindcss/postcss`) |
+| Язык | TypeScript 5.9 |
+| БД | **PostgreSQL** через Drizzle ORM 0.45 (`pg`, `postgres`) |
+| Middleware | `src/proxy.ts` — это middleware Next 16 (новое имя вместо `middleware.ts`) |
+| Прочее | `xlsx` (экспорт Excel), `ffmpeg-static`, `dotenv` |
+| Запуск | `npm run dev` → http://localhost:3000 |
+| Репозиторий | https://github.com/Reppot/Sandalis-Web, ветка `main` |
+| Локальный путь | `D:\Sandalis Web\SIND-site` |
+| Эталонный бэкап | `D:\Sandalis Web\BackUps\39` — не изменять |
+
+---
+
+## 2. ЗАПРЕЩЕНО (красные флаги)
+
+Если ты собираешься сделать что-то из списка — **остановись и спроси владельца**:
+
+- ❌ Переводить проект на Vite / CRA / любой другой сборщик
+- ❌ Создавать `index.html`, `vite.config.ts`, `src/main.tsx`, `src/App.tsx`, `src/views/*`
+- ❌ Переписывать `package.json` / `package-lock.json` / `tsconfig.json` с нуля
+- ❌ Менять структуру `src/app` (страницы и API) и `src/components`
+- ❌ Предлагать `npm install` для «восстановления» — сначала проверить, что `package.json` содержит `"next": "16.2.6"`
+- ❌ Делать `git pull` без предварительного `git fetch` + `git log --stat origin/main -1`
+- ❌ Использовать ветку `vite-rewrite` — это мусор, оставлен только как архив
+
+**Разрешено:** править и добавлять файлы внутри существующей структуры, добавлять зависимости через `npm install <pkg>`, менять схему БД через Drizzle.
+
+---
+
+## 3. Почему эти запреты существуют (история инцидента)
+
+1. Сайт разрабатывался в чате с ИИ. Чат переполнился, работа перешла в новый чат.
+2. Новый чат **не имел контекста** и, не видя проекта, начал переписывать его на Vite.
+3. В папку проекта попал `package.json` от `react-vite-tailwind`. Команда `npm install` **снесла 340 пакетов Next.js**.
+4. Коммит с обманчивым названием «Add missing 18 icons» на самом деле залил в `main` целый Vite-проект и перезаписал конфиги.
+5. Восстановлено из бэкапа 39. `main` откачен на рабочий коммит, Vite-версия вынесена в ветку `vite-rewrite`.
+
+**Вывод:** ИИ без контекста склонен «пересоздать проект». Этот файл и снимки `SNAP_*.md` — защита от повторения.
+
+---
+
+## 4. Структура проекта
+
+```
+src/
+  proxy.ts                  middleware (auth, редиректы)
+  app/
+    layout.tsx, page.tsx, globals.css
+    api/                    route.ts — REST-эндпоинты
+      auth/{login,logout,me}
+      orders/, orders/[id]
+      stockpiles/, stockpiles/[id]
+      scan/, storage/, health/
+    cabinet/ codes/ map/ orders/ timers/ tools/ tools/factory/ training/   — страницы (page.tsx)
+  components/
+    shell/        Header, Sidebar, MobileNav, Ticker, BackgroundLayer, TerminalShell
+    providers/    Theme, Notification, Terminal
+    ui/           Modal
+    orders/       OrdersWorkspace, OrderBuilder, StorageMonitor, ExportBar, ReportPreviewModal, GameItemIcon
+    codes/        CodeBaseWorkspace
+    timers/       TimersWorkspace, StockpileModals
+    tools/        ToolsWorkspace, FactoryWorkspace
+    cabinet/      CabinetWorkspace
+    training/     TrainingWorkspace
+  lib/
+    factory-data.ts (118 КБ), item-catalog.ts (58 КБ), itemCodes.ts (56 КБ)   — большие файлы данных
+    constants.ts, types.ts, parsers.ts, exporters.ts, time.ts, mapdata.ts
+    auth-profiles.ts, code-base.ts, foxhole-data.ts, item-icon-overrides.ts
+    server/stockpile-repo.ts
+  db/
+    index.ts (подключение), schema.ts (Drizzle-схема)
+data/         catalog.json, fs_vanilla.h5, README.md
+public/
+  FoxholeWikiPhotos/   378 иконок предметов (это полное число, не 396)
+  bg/ gifs/ icons/ stikers/ Videos/ (видео не в git — >100 МБ)
+scripts/
+  import-foxhole-data.mjs
+  snapshot.ps1          генератор SNAP_*.md
+```
+
+---
+
+## 5. Как ИИ получает контекст проекта (система снимков)
+
+Файлы `SNAP_1_core.md … SNAP_4_workspaces.md` в корне — автоматический слепок кода.
+Они **не в git** (`.gitignore`) и **пересобираются сами** после каждого `git commit` (хук `.git/hooks/post-commit`).
+
+| Файл | Содержимое | ~Размер |
+|---|---|---|
+| `SNAP_1_core.md` | шапка, дерево, конфиги, `src/db`, `src/lib` | 92 КБ |
+| `SNAP_2_app.md` | `src/app/api`, все `page.tsx`, `scripts` | 31 КБ |
+| `SNAP_3_shell.md` | shell, providers, ui, cabinet, training | 58 КБ |
+| `SNAP_4_workspaces.md` | orders, codes, timers, tools | 114 КБ |
+
+Файлы больше 25 КБ (`factory-data.ts`, `item-catalog.ts`, `itemCodes.ts`, `globals.css`) в снимках **обрезаны до 40 строк**. Если нужен полный текст — ИИ должен запросить его отдельно.
+
+**Для ИИ:** после получения всех 4 частей ты знаешь актуальное состояние кода. Не проси «покажи структуру» — она в SNAP_1. Хеш коммита в шапке снимка = последнее состояние `main`.
+
+---
+
+## 6. Рабочий процесс
+
+### Начало сессии с ИИ (владелец)
+1. Убедиться: `git status` чистый.
+2. Открыть новый чат, вставить 4 сообщения `SNAP_1…4` с пометкой «часть N/4, пока не отвечай».
+3. Пятым сообщением — задача.
+
+### Внесение изменений
+```
+ИИ даёт код  →  владелец вставляет в файлы  →  npm run dev / npm run typecheck
+  ├─ работает → git add -A; git commit -m "..."; git push   (снимки обновятся сами)
+  └─ сломалось → git checkout .   (мгновенный откат к последнему коммиту)
+```
+
+### Правила для ИИ при выдаче кода
+- Указывать **полный путь файла** и давать файл целиком или чёткий diff.
+- Не предлагать изменений более чем в 3–4 файлах за один шаг — владелец должен успевать проверять.
+- Перед изменением схемы БД (`src/db/schema.ts`) предупредить: потребуется `npx drizzle-kit push`.
+- Не менять `package.json` без явной причины; новые пакеты — через `npm install <pkg>`.
+
+---
+
+## 7. Команды
+
+```powershell
+cd "D:\Sandalis Web\SIND-site"
+
+npm run dev          # dev-сервер, localhost:3000
+npm run build        # прод-сборка
+npm run typecheck    # tsc --noEmit
+npm run lint         # eslint
+npm run snapshot     # пересобрать SNAP_*.md вручную
+
+npx drizzle-kit push     # применить schema.ts к БД
+npx drizzle-kit studio   # GUI для БД
+```
+
+### Git — безопасный цикл
+```powershell
+git status                              # перед любыми правками — должно быть чисто
+git add -A; git commit -m "msg"; git push
+git checkout .                          # откат незакоммиченных правок
+git reset --hard <hash>                 # откат к коммиту (локально)
+git fetch; git log --stat origin/main -1   # ВСЕГДА перед git pull
+```
+
+### Восстановление хука (если склонировал репо заново или удалил `.git`)
+```powershell
+$hook = "#!/bin/sh`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/snapshot.ps1 >/dev/null 2>&1`nexit 0`n"
+[IO.File]::WriteAllText("$PWD\.git\hooks\post-commit", $hook)
+```
+
+### Аварийное восстановление из бэкапа 39
+```powershell
+$B="D:\Sandalis Web\BackUps\39"; $S="D:\Sandalis Web\SIND-site"
+Rename-Item $S "SIND-site_broken"
+robocopy $B $S /E /XD ".git" /MT:16 /NFL /NDL /NJH /NJS
+robocopy "D:\Sandalis Web\SIND-site_broken\.git" "$S\.git" /E /MT:16 /NFL /NDL /NJH /NJS
+cd $S; npm run dev
+```
+
+---
+
+## 8. Окружение
+
+- `.env` — локальный, содержит `DATABASE_URL` и секреты. **Не коммитить.** Шаблон — `.env.example`.
+- Для работы страниц `orders`, `timers`, `cabinet` нужна запущенная PostgreSQL.
+- `scripts/snapshot.ps1` должен быть сохранён в **UTF-8 with BOM**, иначе Windows PowerShell 5.1 не разберёт кириллицу.
+- Предупреждения `LF will be replaced by CRLF` при коммите — безвредны.
+- Лимит GitHub — 100 МБ на файл. `public/Videos/*.mp4` исключены через `.gitignore`.
+
+---
+
+## 9. Известные факты (чтобы не переспрашивать)
+
+- Иконок в `public/FoxholeWikiPhotos` — **378**. Цифра «396» была ошибочной.
+- `all_files_paths.txt` (2.9 МБ) — служебный листинг, на работу не влияет.
+- `data/fs_vanilla.h5` — данные игры, используются скриптом импорта.
+- Ветка `vite-rewrite` — архив ошибочной переделки, можно удалить.
+
+---
+
+## 10. Журнал (дописывать при значимых изменениях)
+
+| Дата | Коммит | Что |
+|---|---|---|
+| 2026-09-20 | `d2e8b7d` | Initial commit — рабочее состояние = бэкап 39 |
+| 2026-09-21 | `906a263` | ❌ Vite-переписывание (откачено, в ветке `vite-rewrite`) |
+| 2026-09-21 | `cf113dd` | Добавлен `scripts/snapshot.ps1`, хук post-commit |
+| 2026-09-21 | `f1e3c67` | Исправлена кодировка snapshot.ps1 |
+
+
+
+================================================
 FILE: next-env.d.ts
 ================================================
 /// <reference types="next" />
 /// <reference types="next/image-types/global" />
-import "./.next/dev/types/routes.d.ts";
+import "./.next/types/routes.d.ts";
 
 // NOTE: This file should not be edited
 // see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
@@ -530,7 +754,15 @@ FILE: next.config.ts
 ================================================
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = {
+  images: {
+    remotePatterns: [
+      // Аватары участников из Discord (B1-a)
+      { protocol: "https", hostname: "cdn.discordapp.com" },
+      { protocol: "https", hostname: "media.discordapp.net" },
+    ],
+  },
+};
 
 export default nextConfig;
 
@@ -618,6 +850,17 @@ services:
         sync: false
       - key: ACCESS_TOKENS_JSON
         sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DISCORD_GUILD_ID
+        sync: false
+      - key: DISCORD_REDIRECT_URI
+        sync: false
+      - key: NEXT_PUBLIC_VIDEO_URL
+        sync: false
+
 
 
 ================================================
@@ -835,6 +1078,19 @@ ACCESS_TOKEN="секретный_пароль_клана"
 # Необязательно: дополнительные токены участников.
 # Каждый объект связывает секретный токен с Discord ID из реестра профилей.
 # ACCESS_TOKENS_JSON='[{"token":"ВТОРОЙ_СЕКРЕТ","discordId":"450743910327910410"}]'
+
+# ── Discord OAuth (задача B1-a) ─────────────────────────────────────────────
+# Discord Developer Portal → Applications → OAuth2. Redirect URI должен совпадать
+# с DISCORD_REDIRECT_URI (для прода: https://sandalis-web-mtbf.onrender.com/api/auth/discord/callback).
+DISCORD_CLIENT_ID="<client-id>"
+DISCORD_CLIENT_SECRET="<client-secret>"
+# ID сервера клана (допустимо старое имя DISCORD_SERVER_ID).
+DISCORD_GUILD_ID="762509239683776512"
+# Необязательно: если не задано — берётся origin текущего запроса + /api/auth/discord/callback.
+# DISCORD_REDIRECT_URI="http://localhost:3000/api/auth/discord/callback"
+
+# Публичная ссылка на фоновое видео главной (файл public/Videos не в git и отсутствует на Render).
+# NEXT_PUBLIC_VIDEO_URL="https://<project>.supabase.co/storage/v1/object/public/media/video.mp4"
 
 
 
@@ -3235,46 +3491,57 @@ Dump $p4 "SNAP_4_workspaces.md" "Часть 4/4: orders, codes, timers, tools"
 FILE: src/proxy.ts
 ================================================
 import { NextRequest, NextResponse } from "next/server";
-import { findAccessProfile } from "@/lib/auth-profiles";
+import { SESSION_COOKIE, validateSessionById } from "@/lib/auth/session";
 
-const SESSION_COOKIE = "sindaris_session_token";
-const SESSION_EXPIRY_COOKIE = "sindaris_session_expires_at";
-
+/** Публичные маршруты: вход, health и статика. Всё остальное — только с валидной сессией в БД. */
 function isPublicPath(pathname: string): boolean {
-  return (
+  if (
     pathname === "/" ||
     pathname === "/api/auth/login" ||
+    pathname === "/api/auth/logout" ||
+    pathname === "/api/auth/me" ||
+    pathname.startsWith("/api/auth/discord/") ||
     pathname === "/api/health" ||
-    pathname === "/favicon.ico" ||
-    pathname === "/clan-logo.png" ||
-    pathname.startsWith("/_next/") ||
-    pathname.startsWith("/FoxholeWikiPhotos/") ||
-    pathname.startsWith("/icons/") ||
-    pathname.startsWith("/bg/") ||
-    pathname.startsWith("/Videos/")
-  );
+    pathname.startsWith("/_next/")
+  ) {
+    return true;
+  }
+  // Статические файлы из public/ (иконки, фоны, видео, gif и т.д.) — по расширению.
+  return /\.[a-z0-9]{2,5}$/i.test(pathname);
 }
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 
-  const sessionToken = request.cookies.get(SESSION_COOKIE)?.value ?? "";
-  const expiryRaw = request.cookies.get(SESSION_EXPIRY_COOKIE)?.value ?? "0";
-  const sessionExpiresAt = Number(expiryRaw);
-  const sessionIsFresh = Number.isFinite(sessionExpiresAt) && sessionExpiresAt > Date.now();
-  const authorized = Boolean(findAccessProfile(sessionToken) && sessionIsFresh);
+  const sessionId = request.cookies.get(SESSION_COOKIE)?.value;
+  let authorized = false;
+  if (sessionId) {
+    try {
+      authorized = Boolean(await validateSessionById(sessionId));
+    } catch (error) {
+      console.error("[SIND][PROXY] session check failed:", error instanceof Error ? error.message : error);
+    }
+  }
 
   if (authorized) {
     return NextResponse.next();
   }
 
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const loginUrl = new URL("/", request.url);
-  if (pathname !== "/") loginUrl.searchParams.set("next", pathname);
-  return NextResponse.redirect(loginUrl);
+  loginUrl.searchParams.set("next", pathname);
+  const response = NextResponse.redirect(loginUrl);
+  // Протухшие cookie чистим, чтобы TerminalShell не зациклился.
+  response.cookies.delete(SESSION_COOKIE);
+  response.cookies.delete("sindaris_session_expires_at");
+  return response;
 }
 
 export const config = {
@@ -4143,14 +4410,32 @@ FILE: src/app/page.tsx
 "use client";
 
 import Image from "next/image";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+
+const OAUTH_ERRORS: Record<string, string> = {
+  not_on_server: "[ОТКАЗАНО] ЭТОТ DISCORD-АККАУНТ НЕ СОСТОИТ НА СЕРВЕРЕ SINDARIS",
+  state_mismatch: "[СИСТЕМА] СЕССИЯ АВТОРИЗАЦИИ ИСТЕКЛА — ПОПРОБУЙТЕ СНОВА",
+  oauth_failed: "[СИСТЕМА] DISCORD ОТКЛОНИЛ ВХОД ИЛИ ПРОИЗОШЛА ОШИБКА",
+  oauth_not_configured: "[СИСТЕМА] DISCORD OAUTH НЕ НАСТРОЕН НА СЕРВЕРЕ",
+  rate_limited: "[СИСТЕМА] СЛИШКОМ МНОГО ПОПЫТОК — ПОДОЖДИТЕ 10 МИНУТ",
+};
 
 export default function LoginPage() {
   const router = useRouter();
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Ошибки Discord OAuth приходят через ?error=... (читаем без useSearchParams,
+  // чтобы не оборачивать страницу в Suspense).
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("error");
+    if (code) {
+      setError(OAUTH_ERRORS[code] ?? "[СИСТЕМА] ОШИБКА АВТОРИЗАЦИИ");
+      window.history.replaceState(null, "", "/");
+    }
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -4192,7 +4477,7 @@ export default function LoginPage() {
         playsInline
         preload="auto"
         className="absolute inset-0 z-0 h-full w-full object-cover"
-        src="/Videos/Video Project.mp4"
+        src={process.env.NEXT_PUBLIC_VIDEO_URL ?? "/Videos/Video Project.mp4"}
         aria-hidden
       />
       <div className="absolute inset-0 z-0 bg-black/60 backdrop-blur-[2px]" aria-hidden />
@@ -4206,9 +4491,24 @@ export default function LoginPage() {
 
         <div className="auth-rule" />
 
+        <div className="auth-form">
+          <a
+            href="/api/auth/discord/authorize"
+            className="btn btn-primary auth-submit"
+            style={{ backgroundColor: "#5865F2", borderColor: "#5865F2", textDecoration: "none" }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
+            </svg>
+            <span>ВОЙТИ ЧЕРЕЗ DISCORD</span>
+          </a>
+        </div>
+
+        <div className="auth-rule" />
+
         <form className="auth-form" onSubmit={submit}>
           <label htmlFor="access-token" className="auth-label">
-            ВВЕДИТЕ КЛЮЧ ДОСТУПА СИНДИКАТА (TOKEN)
+            РЕЗЕРВНЫЙ ВХОД: КЛЮЧ ДОСТУПА СИНДИКАТА (TOKEN)
           </label>
           <div className={`auth-input-wrap ${error ? "auth-input-error" : ""}`}>
             <span className="auth-prompt" aria-hidden>&gt;_</span>
@@ -4222,7 +4522,6 @@ export default function LoginPage() {
               }}
               placeholder="СЕКРЕТНЫЙ КЛАНОВЫЙ КЛЮЧ"
               autoComplete="current-password"
-              autoFocus
               spellCheck={false}
               disabled={busy}
               aria-invalid={Boolean(error)}
@@ -4250,19 +4549,297 @@ export default function LoginPage() {
 
 
 ================================================
-FILE: src/app/api/auth/login/route.ts
+FILE: src/app/api/auth/discord/authorize/route.ts
 ================================================
 import { NextResponse } from "next/server";
-import { findAccessProfile } from "@/lib/auth-profiles";
+import { randomBytes } from "node:crypto";
+import { isRateLimited } from "@/lib/auth/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const SESSION_COOKIE = "sindaris_session_token";
-const SESSION_EXPIRY_COOKIE = "sindaris_session_expires_at";
-const SESSION_MAX_AGE = 60 * 30;
+const OAUTH_STATE_COOKIE = "sindaris_oauth_state";
 
+function getRedirectUri(request: Request): string {
+  const configured = process.env.DISCORD_REDIRECT_URI?.trim();
+  if (configured) return configured;
+  return `${new URL(request.url).origin}/api/auth/discord/callback`;
+}
+
+export async function GET(request: Request) {
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  if (isRateLimited(`discord_authorize:${ip}`)) {
+    return NextResponse.redirect(new URL("/?error=rate_limited", request.url));
+  }
+
+  const clientId = process.env.DISCORD_CLIENT_ID?.trim();
+  if (!clientId) {
+    return NextResponse.redirect(new URL("/?error=oauth_not_configured", request.url));
+  }
+
+  const state = randomBytes(32).toString("hex");
+
+  const authorizeUrl = new URL("https://discord.com/oauth2/authorize");
+  authorizeUrl.searchParams.set("client_id", clientId);
+  authorizeUrl.searchParams.set("redirect_uri", getRedirectUri(request));
+  authorizeUrl.searchParams.set("response_type", "code");
+  authorizeUrl.searchParams.set("scope", "identify guilds.members.read");
+  authorizeUrl.searchParams.set("state", state);
+  authorizeUrl.searchParams.set("prompt", "consent");
+
+  const response = NextResponse.redirect(authorizeUrl);
+  response.cookies.set({
+    name: OAUTH_STATE_COOKIE,
+    value: state,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 600,
+  });
+  return response;
+}
+
+
+
+================================================
+FILE: src/app/api/auth/discord/callback/route.ts
+================================================
+import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { members } from "@/db/schema";
+import { attachSessionCookies, createSession } from "@/lib/auth/session";
+import { accessLevelFromRoles, mapDiscordRoles } from "@/lib/discord-roles";
+import { isRateLimited } from "@/lib/auth/rate-limit";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+const OAUTH_STATE_COOKIE = "sindaris_oauth_state";
+const GUILD_ID = process.env.DISCORD_GUILD_ID?.trim() || process.env.DISCORD_SERVER_ID?.trim() || "762509239683776512";
+
+function getRedirectUri(requestUrl: string): string {
+  const configured = process.env.DISCORD_REDIRECT_URI?.trim();
+  if (configured) return configured;
+  return `${new URL(requestUrl).origin}/api/auth/discord/callback`;
+}
+
+interface DiscordTokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  scope: string;
+}
+
+interface DiscordUser {
+  id: string;
+  username: string;
+  global_name?: string | null;
+  avatar?: string | null;
+}
+
+interface DiscordGuildMember {
+  roles: string[];
+  joined_at?: string;
+  nick?: string | null;
+}
+
+async function exchangeCode(code: string, redirectUri: string): Promise<DiscordTokenResponse> {
+  const clientId = process.env.DISCORD_CLIENT_ID?.trim();
+  const clientSecret = process.env.DISCORD_CLIENT_SECRET?.trim();
+  if (!clientId || !clientSecret) {
+    throw new Error("Discord OAuth credentials are not configured");
+  }
+
+  const response = await fetch("https://discord.com/api/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Discord token exchange failed: ${response.status} ${text}`);
+  }
+
+  return (await response.json()) as DiscordTokenResponse;
+}
+
+async function fetchDiscordUser(accessToken: string): Promise<DiscordUser> {
+  const response = await fetch("https://discord.com/api/users/@me", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Discord user fetch failed: ${response.status}`);
+  }
+  return (await response.json()) as DiscordUser;
+}
+
+async function fetchGuildMember(accessToken: string): Promise<DiscordGuildMember> {
+  const response = await fetch(`https://discord.com/api/users/@me/guilds/${GUILD_ID}/member`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (response.status === 404) {
+    throw new Error("NOT_ON_SERVER");
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Discord guild member fetch failed: ${response.status} ${text}`);
+  }
+  return (await response.json()) as DiscordGuildMember;
+}
+
+function avatarUrl(userId: string, avatarHash: string | null | undefined): string {
+  if (avatarHash) {
+    return `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.png?size=128`;
+  }
+  return "https://cdn.discordapp.com/embed/avatars/0.png";
+}
+
+async function upsertMember(user: DiscordUser, guildMember: DiscordGuildMember): Promise<number> {
+  const mappedRoles = mapDiscordRoles(guildMember.roles ?? []);
+  const accessLevel = accessLevelFromRoles(mappedRoles);
+  const avatar = avatarUrl(user.id, user.avatar);
+  const displayName = guildMember.nick?.trim() || user.global_name?.trim() || user.username;
+  const memberSince = guildMember.joined_at ? new Date(guildMember.joined_at) : null;
+  const now = new Date();
+
+  const [existing] = await db
+    .select({ id: members.id })
+    .from(members)
+    .where(eq(members.discordId, user.id))
+    .limit(1);
+
+  if (existing) {
+    await db
+      .update(members)
+      .set({
+        discordName: user.username,
+        displayName,
+        avatarUrl: avatar,
+        roles: mappedRoles,
+        accessLevel,
+        ...(memberSince ? { memberSince } : {}),
+        lastSeenAt: now,
+        updatedAt: now,
+      })
+      .where(eq(members.id, existing.id));
+    return existing.id;
+  }
+
+  const [created] = await db
+    .insert(members)
+    .values({
+      discordId: user.id,
+      discordName: user.username,
+      displayName,
+      avatarUrl: avatar,
+      roles: mappedRoles,
+      accessLevel,
+      memberSince,
+      lastSeenAt: now,
+    })
+    .returning({ id: members.id });
+
+  return created.id;
+}
+
+function redirectWithError(origin: string, code: string): NextResponse {
+  const response = NextResponse.redirect(new URL(`/?error=${code}`, origin));
+  response.cookies.delete(OAUTH_STATE_COOKIE);
+  return response;
+}
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+
+  if (isRateLimited(`discord_callback:${ip}`)) {
+    return redirectWithError(url.origin, "rate_limited");
+  }
+
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  const savedState = cookieHeader
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${OAUTH_STATE_COOKIE}=`))
+    ?.slice(OAUTH_STATE_COOKIE.length + 1);
+
+  const state = url.searchParams.get("state");
+  const code = url.searchParams.get("code");
+  const oauthError = url.searchParams.get("error");
+
+  if (oauthError) {
+    return redirectWithError(url.origin, "oauth_failed");
+  }
+  if (!savedState || !state || savedState !== state) {
+    console.error("[SIND][DISCORD_CALLBACK] state mismatch");
+    return redirectWithError(url.origin, "state_mismatch");
+  }
+  if (!code) {
+    return redirectWithError(url.origin, "oauth_failed");
+  }
+
+  try {
+    const tokenData = await exchangeCode(code, getRedirectUri(request.url));
+    const user = await fetchDiscordUser(tokenData.access_token);
+    const guildMember = await fetchGuildMember(tokenData.access_token);
+    const memberId = await upsertMember(user, guildMember);
+
+    const session = await createSession(memberId, {
+      ip,
+      userAgent: request.headers.get("user-agent") ?? undefined,
+    });
+
+    console.log(`[SIND][DISCORD_CALLBACK] login ok: member=${memberId} discord=${user.id} roles=${guildMember.roles.length}`);
+
+    const response = NextResponse.redirect(new URL("/cabinet", url.origin));
+    response.cookies.delete(OAUTH_STATE_COOKIE);
+    return attachSessionCookies(response, session);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message === "NOT_ON_SERVER") {
+      return redirectWithError(url.origin, "not_on_server");
+    }
+    console.error("[SIND][DISCORD_CALLBACK] ERROR:", message);
+    return redirectWithError(url.origin, "oauth_failed");
+  }
+}
+
+
+
+================================================
+FILE: src/app/api/auth/login/route.ts
+================================================
+import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { members } from "@/db/schema";
+import { createSession, setSessionCookies } from "@/lib/auth/session";
+import { findAccessProfile } from "@/lib/auth-profiles";
+import { isRateLimited } from "@/lib/auth/rate-limit";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+/**
+ * Резервный вход по мастер-токену или персональным токенам.
+ * Создаёт запись в members (если нужно) и сессию в БД.
+ */
 export async function POST(request: Request) {
+  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+
+  if (isRateLimited(`token_login:${ip}`)) {
+    return Response.json({ error: "Слишком много попыток. Попробуйте позже." }, { status: 429 });
+  }
+
   if (!process.env.ACCESS_TOKEN?.trim() && !process.env.ACCESS_TOKENS_JSON?.trim()) {
     return Response.json(
       { error: "[СИСТЕМА] ACCESS_TOKEN НЕ НАСТРОЕН В ОКРУЖЕНИИ СЕРВЕРА" },
@@ -4277,35 +4854,60 @@ export async function POST(request: Request) {
     return Response.json({ error: "[ОТКАЗАНО В ДОСТУПЕ] НЕВЕРНЫЙ СЕКРЕТНЫЙ КОД" }, { status: 401 });
   }
 
-  const token = body && typeof body === "object" && "token" in body && typeof body.token === "string"
-    ? body.token.trim()
-    : "";
+  const token =
+    body && typeof body === "object" && "token" in body && typeof body.token === "string"
+      ? body.token.trim()
+      : "";
 
   const accessProfile = findAccessProfile(token);
   if (!accessProfile) {
     return Response.json({ error: "[ОТКАЗАНО В ДОСТУПЕ] НЕВЕРНЫЙ СЕКРЕТНЫЙ КОД" }, { status: 401 });
   }
 
-  const response = NextResponse.json({ ok: true });
-  response.cookies.set({
-    name: SESSION_COOKIE,
-    value: token,
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: SESSION_MAX_AGE,
+  const profile = accessProfile.profile;
+  const now = new Date();
+
+  // Ищем участника по discordId; если нет — создаём
+  let [member] = await db
+    .select()
+    .from(members)
+    .where(eq(members.discordId, profile.discordId))
+    .limit(1);
+
+  if (!member) {
+    const [created] = await db
+      .insert(members)
+      .values({
+        discordId: profile.discordId,
+        discordName: profile.username,
+        displayName: profile.displayName,
+        avatarUrl: profile.avatar,
+        serverId: process.env.DISCORD_GUILD_ID?.trim() || process.env.DISCORD_SERVER_ID?.trim() || "762509239683776512",
+        serverName: profile.server,
+        roles: profile.roles.length ? profile.roles : ["member"],
+        accessLevel: "full",
+        isActive: true,
+        memberSince: null,
+        lastSeenAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+    member = created;
+  } else {
+    await db
+      .update(members)
+      .set({ lastSeenAt: now, updatedAt: now })
+      .where(eq(members.id, member.id));
+  }
+
+  const session = await createSession(member.id, {
+    ip,
+    userAgent: request.headers.get("user-agent") ?? undefined,
   });
-  response.cookies.set({
-    name: SESSION_EXPIRY_COOKIE,
-    value: String(Date.now() + SESSION_MAX_AGE * 1000),
-    httpOnly: false,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: SESSION_MAX_AGE,
-  });
-  return response;
+  await setSessionCookies(session);
+
+  return NextResponse.json({ ok: true });
 }
 
 
@@ -4314,14 +4916,13 @@ export async function POST(request: Request) {
 FILE: src/app/api/auth/logout/route.ts
 ================================================
 import { NextResponse } from "next/server";
+import { destroySession } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
 export async function POST() {
-  const response = NextResponse.json({ ok: true });
-  response.cookies.delete("sindaris_session_token");
-  response.cookies.delete("sindaris_session_expires_at");
-  return response;
+  await destroySession();
+  return NextResponse.json({ ok: true });
 }
 
 
@@ -4329,27 +4930,115 @@ export async function POST() {
 ================================================
 FILE: src/app/api/auth/me/route.ts
 ================================================
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { findAccessProfile } from "@/lib/auth-profiles";
+import { readSession } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get("sindaris_session_token")?.value ?? "";
-  const expiresAt = Number(cookieStore.get("sindaris_session_expires_at")?.value ?? 0);
-  const accessProfile = findAccessProfile(token);
+function formatDate(value: Date | null | undefined): string {
+  if (!value) return "Дата не загружена";
+  return new Date(value).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" });
+}
 
-  if (!accessProfile || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+export async function GET() {
+  const session = await readSession();
+
+  if (!session) {
     return NextResponse.json({ authenticated: false }, { status: 401 });
   }
 
   return NextResponse.json({
     authenticated: true,
-    profile: accessProfile.profile,
-    sessionExpiresAt: expiresAt,
+    profile: {
+      discordId: session.discordId,
+      displayName: session.displayName,
+      username: session.discordName,
+      avatar: session.avatarUrl ?? "/clan-logo.png",
+      status: "В сети",
+      memberSince: formatDate(session.memberSince),
+      profileUpdated: formatDate(session.profileUpdatedAt),
+      server: session.serverName,
+      serverId: session.serverId,
+      roles: session.roles,
+      accessLevel: session.accessLevel,
+    },
+    // Клиент (CabinetWorkspace) ожидает число — epoch-ms.
+    sessionExpiresAt: session.expiresAt.getTime(),
   });
+}
+
+
+
+================================================
+FILE: src/app/api/auth/sessions/route.ts
+================================================
+import { NextResponse } from "next/server";
+import { and, eq, ne } from "drizzle-orm";
+import { db } from "@/db";
+import { sessions } from "@/db/schema";
+import { readSession, clearSessionCookies } from "@/lib/auth/session";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  const session = await readSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const rows = await db
+    .select({
+      id: sessions.id,
+      createdAt: sessions.createdAt,
+      expiresAt: sessions.expiresAt,
+      lastSeenAt: sessions.lastSeenAt,
+      lastIp: sessions.lastIp,
+      userAgent: sessions.userAgent,
+    })
+    .from(sessions)
+    .where(eq(sessions.memberId, session.memberId))
+    .orderBy(sessions.createdAt);
+
+  return NextResponse.json({
+    current: session.sessionId,
+    sessions: rows.map((r) => ({
+      ...r,
+      createdAt: r.createdAt.toISOString(),
+      expiresAt: r.expiresAt.toISOString(),
+      lastSeenAt: r.lastSeenAt?.toISOString() ?? null,
+    })),
+  });
+}
+
+export async function DELETE(request: Request) {
+  const session = await readSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
+  const all = searchParams.get("all") === "true";
+
+  if (all) {
+    // Удаляем все сессии участника, кроме текущей
+    await db
+      .delete(sessions)
+      .where(and(eq(sessions.memberId, session.memberId), ne(sessions.id, session.sessionId)));
+    return NextResponse.json({ ok: true });
+  }
+
+  if (id) {
+    await db
+      .delete(sessions)
+      .where(eq(sessions.id, id));
+    if (id === session.sessionId) {
+      await clearSessionCookies();
+    }
+    return NextResponse.json({ ok: true });
+  }
+
+  return NextResponse.json({ error: "Укажите id или all=true" }, { status: 400 });
 }
 
 
@@ -4730,6 +5419,192 @@ export default function CodesPage() {
 
 
 ================================================
+FILE: src/app/login/page.tsx
+================================================
+"use client";
+
+import Image from "next/image";
+import { useSearchParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
+
+const errorMessages: Record<string, string> = {
+  not_on_server: "Этот Discord-аккаунт не на сервере SINDARIS.",
+  state_mismatch: "Сессия авторизации истекла, попробуйте снова.",
+  oauth_failed: "Discord отклонил вход или произошла ошибка.",
+  oauth_not_configured: "Discord OAuth не настроен на сервере.",
+  rate_limited: "Слишком много попыток. Попробуйте позже.",
+};
+
+function LoginForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [tokenError, setTokenError] = useState("");
+  const [showToken, setShowToken] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  const oauthError = searchParams.get("error");
+  const next = searchParams.get("next") ?? "/cabinet";
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/me", { credentials: "same-origin", cache: "no-store" })
+      .then((res) => {
+        if (res.ok && !cancelled) {
+          router.replace(next);
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [router, next]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const value = token.trim();
+    if (!value || busy) return;
+
+    setBusy(true);
+    setTokenError("");
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ token: value }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        setTokenError(payload?.error ?? "[ОТКАЗАНО В ДОСТУПЕ]");
+        setToken("");
+        return;
+      }
+
+      router.replace(next);
+      router.refresh();
+    } catch {
+      setTokenError("[СИСТЕМА] НЕТ СВЯЗИ С КАНАЛОМ АВТОРИЗАЦИИ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (checking) {
+    return (
+      <main className="auth-screen">
+        <div className="absolute inset-0 z-0 bg-black/80" aria-hidden />
+        <section className="auth-panel panel panel-corners relative z-10 flex min-h-[20rem] items-center justify-center">
+          <span className="pulse text-muted">Проверка сессии...</span>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="auth-screen">
+      <div className="absolute inset-0 z-0 bg-black/80" aria-hidden />
+
+      <section className="auth-panel panel panel-corners relative z-10">
+        <div className="auth-scanline" aria-hidden />
+        <div className="auth-header">
+          <Image src="/clan-logo.png" alt="Герб клана SINDARIS" width={160} height={200} priority className="auth-logo" />
+          <h1 className="auth-title">SINDARIS Terminal</h1>
+        </div>
+
+        <div className="auth-rule" />
+
+        {oauthError && (
+          <div className="auth-error mb-4" role="alert">
+            <span className="auth-error-mark">!</span>
+            <span>{errorMessages[oauthError] ?? "Ошибка авторизации"}</span>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-4">
+          <a
+            href="/api/auth/discord/authorize"
+            className="btn btn-primary auth-submit flex items-center justify-center gap-3"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
+            </svg>
+            <span>ВОЙТИ ЧЕРЕЗ DISCORD</span>
+          </a>
+
+          <button
+            type="button"
+            className="text-xs text-white/60 underline hover:text-white"
+            onClick={() => setShowToken((v) => !v)}
+          >
+            {showToken ? "Скрыть вход по токену" : "Вход по токену (резерв)"}
+          </button>
+
+          {showToken && (
+            <form className="auth-form" onSubmit={submit}>
+              <label htmlFor="access-token" className="auth-label">
+                РЕЗЕРВНЫЙ КЛЮЧ ДОСТУПА
+              </label>
+              <div className={`auth-input-wrap ${tokenError ? "auth-input-error" : ""}`}>
+                <span className="auth-prompt" aria-hidden>&gt;_</span>
+                <input
+                  id="access-token"
+                  type="password"
+                  value={token}
+                  onChange={(event) => {
+                    setToken(event.target.value);
+                    if (tokenError) setTokenError("");
+                  }}
+                  placeholder="СЕКРЕТНЫЙ КЛАНОВЫЙ КЛЮЧ"
+                  autoComplete="current-password"
+                  spellCheck={false}
+                  disabled={busy}
+                  aria-invalid={Boolean(tokenError)}
+                  aria-describedby={tokenError ? "auth-token-error" : undefined}
+                />
+              </div>
+
+              {tokenError && (
+                <div id="auth-token-error" className="auth-error" role="alert">
+                  <span className="auth-error-mark">!</span>
+                  <span>{tokenError}</span>
+                </div>
+              )}
+
+              <button type="submit" className="btn btn-secondary auth-submit" disabled={!token.trim() || busy}>
+                <span className={busy ? "pulse" : ""}>{busy ? "ПРОВЕРКА..." : "ИНИЦИАЛИЗИРОВАТЬ"}</span>
+              </button>
+            </form>
+          )}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <main className="auth-screen">
+        <div className="absolute inset-0 z-0 bg-black/80" aria-hidden />
+        <section className="auth-panel panel panel-corners relative z-10 flex min-h-[20rem] items-center justify-center">
+          <span className="pulse text-muted">Загрузка...</span>
+        </section>
+      </main>
+    }>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+
+
+================================================
 FILE: src/app/map/page.tsx
 ================================================
 import type { Metadata } from "next";
@@ -4912,7 +5787,9 @@ export function CabinetWorkspace() {
 
   useEffect(() => {
     if (!expiresAt) return;
-    const timeout = window.setTimeout(() => router.replace("/"), Math.max(0, expiresAt - Date.now()));
+    // setTimeout принимает максимум 2^31-1 мс (~24.8 дня); сессия живёт 30 дней — ограничиваем задержку.
+    const delay = Math.min(Math.max(0, expiresAt - Date.now()), 2_147_483_647);
+    const timeout = window.setTimeout(() => router.replace("/"), delay);
     return () => window.clearTimeout(timeout);
   }, [expiresAt, router]);
 
@@ -6873,7 +7750,9 @@ export function TerminalShell({ children }: { children: ReactNode }) {
       return;
     }
 
-    const timer = window.setTimeout(() => window.location.replace("/"), Math.max(0, expiresAt - Date.now()));
+    // setTimeout принимает максимум 2^31-1 мс (~24.8 дня); сессия живёт 30 дней — ограничиваем задержку.
+    const delay = Math.min(Math.max(0, expiresAt - Date.now()), 2_147_483_647);
+    const timer = window.setTimeout(() => window.location.replace("/"), delay);
     return () => window.clearTimeout(timer);
   }, [isLoginRoute]);
 
@@ -7967,7 +8846,7 @@ export const db = drizzle(pool);
 ================================================
 FILE: src/db/schema.ts
 ================================================
-import { integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, serial, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 // 🗺️ Склады (таймеры деспавна)
 export const stockpiles = pgTable("stockpiles", {
@@ -8024,11 +8903,44 @@ export const orderItems = pgTable("order_items", {
   unit: text("unit").notNull().default("ящ."),
 });
 
+// 👤 Участники клана (B1-a)
+export const members = pgTable("members", {
+  id: serial("id").primaryKey(),
+  discordId: text("discord_id").notNull().unique(),
+  discordName: text("discord_name").notNull(),
+  displayName: text("display_name").notNull(),
+  avatarUrl: text("avatar_url"),
+  serverId: text("server_id").notNull().default("762509239683776512"),
+  serverName: text("server_name").notNull().default("KUNI"),
+  roles: text("roles").array().notNull().default([]),
+  accessLevel: text("access_level").notNull().default("minimal"),
+  isActive: boolean("is_active").notNull().default(true),
+  memberSince: timestamp("member_since", { withTimezone: true }),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// 🔑 Сессии в БД (B1-a)
+export const sessions = pgTable("sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  memberId: integer("member_id")
+    .notNull()
+    .references(() => members.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
+  lastIp: text("last_ip"),
+  userAgent: text("user_agent"),
+});
+
 export type Stockpile = typeof stockpiles.$inferSelect;
 export type StockpileHistoryRow = typeof stockpileHistory.$inferSelect;
 export type StorageItemRow = typeof storageItems.$inferSelect;
 export type OrderRow = typeof orders.$inferSelect;
 export type OrderItemRow = typeof orderItems.$inferSelect;
+export type Member = typeof members.$inferSelect;
+export type Session = typeof sessions.$inferSelect;
 
 
 
@@ -8142,9 +9054,16 @@ FILE: src/lib/auth.ts
 ================================================
 import { timingSafeEqual } from "node:crypto";
 
-export const SESSION_COOKIE = "sindaris_session_token";
-export const SESSION_EXPIRY_COOKIE = "sindaris_session_expires_at";
-export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 8; // 8 часов — единая точка настройки срока сессии.
+/**
+ * Единая точка констант сессии. С задачи B1-a сессии хранятся в БД (таблица sessions),
+ * cookie содержит UUID сессии, а не сам токен. См. src/lib/auth/session.ts.
+ */
+export {
+  SESSION_COOKIE,
+  SESSION_EXPIRY_COOKIE,
+  SESSION_MAX_AGE_SECONDS,
+  SESSION_MAX_AGE_DAYS,
+} from "@/lib/auth/session";
 
 function constantTimeEqual(left: string, right: string): boolean {
   const a = Buffer.from(left, "utf8");
@@ -8152,7 +9071,7 @@ function constantTimeEqual(left: string, right: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** Список валидных ключей доступа. ACCESS_TOKENS_JSON (массив строк) или одиночный ACCESS_TOKEN. */
+/** Список валидных резервных ключей: ACCESS_TOKENS_JSON (строки или {token}) или одиночный ACCESS_TOKEN. */
 function getValidTokens(): string[] {
   const tokens = new Set<string>();
   const rawList = process.env.ACCESS_TOKENS_JSON?.trim();
@@ -8160,7 +9079,13 @@ function getValidTokens(): string[] {
     try {
       const parsed = JSON.parse(rawList) as unknown;
       if (Array.isArray(parsed)) {
-        for (const entry of parsed) if (typeof entry === "string" && entry.trim()) tokens.add(entry.trim());
+        for (const entry of parsed) {
+          if (typeof entry === "string" && entry.trim()) tokens.add(entry.trim());
+          else if (entry && typeof entry === "object" && typeof (entry as { token?: unknown }).token === "string") {
+            const t = ((entry as { token: string }).token ?? "").trim();
+            if (t) tokens.add(t);
+          }
+        }
       }
     } catch {
       // некорректный JSON не должен ломать одиночный ACCESS_TOKEN
@@ -8518,6 +9443,52 @@ export const EXTERNAL_TOOLS: ExternalTool[] = [
     icon: "✈️",
   },
 ];
+
+
+
+================================================
+FILE: src/lib/discord-roles.ts
+================================================
+/**
+ * Маппинг Discord Role ID → внутренняя роль SINDARIS.
+ *
+ * Чтобы получить Role ID: Discord → настройки сервера → роли → правый клик по роли → Copy Role ID
+ * (требуется включённый Developer Mode).
+ *
+ * Пока карта пустая, всем входящим через Discord присваивается роль 'member'.
+ * Заполните строки по мере сбора ID.
+ */
+export type MemberRole = "officer" | "officer_supply" | "lieutenant" | "staff" | "logistics" | "member";
+
+export const DISCORD_ROLE_MAP: Record<string, MemberRole> = {
+  // Примеры (замените на реальные ID ролей):
+  // "1234567890123456789": "officer",
+  // "1234567890123456790": "logistics",
+};
+
+/**
+ * Преобразует массив Discord Role IDs в наши роли.
+ * Если ни одна роль не распознана — возвращает ['member'].
+ */
+export function mapDiscordRoles(discordRoleIds: string[]): MemberRole[] {
+  const mapped = discordRoleIds
+    .map((id) => DISCORD_ROLE_MAP[id])
+    .filter((role): role is MemberRole => Boolean(role));
+
+  const unique = Array.from(new Set(mapped));
+  return unique.length > 0 ? unique : ["member"];
+}
+
+/**
+ * Вычисляет уровень доступа на основе ролей.
+ */
+export function accessLevelFromRoles(roles: MemberRole[]): "full" | "partial" | "minimal" {
+  if (roles.includes("officer")) return "full";
+  if (roles.includes("officer_supply") || roles.includes("lieutenant") || roles.includes("staff") || roles.includes("logistics")) {
+    return "partial";
+  }
+  return "minimal";
+}
 
 
 
@@ -9288,6 +10259,314 @@ export interface ScanResponse {
 export type Severity = "critical" | "warning" | "safe";
 export type ExportFormat = "txt" | "xlsx" | "png" | "clipboard";
 export type PanelMode = "export" | "import";
+
+
+
+================================================
+FILE: src/lib/auth/rate-limit.ts
+================================================
+/**
+ * Простой in-memory rate limiter для авторизации.
+ * Подходит для одного инстанса (Render Free).
+ */
+
+interface Bucket {
+  count: number;
+  resetAt: number;
+}
+
+const buckets = new Map<string, Bucket>();
+const WINDOW_MS = 10 * 60 * 1000; // 10 минут
+const MAX_ATTEMPTS = 10;
+
+export function isRateLimited(key: string): boolean {
+  const now = Date.now();
+  const bucket = buckets.get(key);
+
+  if (!bucket || now >= bucket.resetAt) {
+    buckets.set(key, { count: 1, resetAt: now + WINDOW_MS });
+    return false;
+  }
+
+  bucket.count += 1;
+  return bucket.count > MAX_ATTEMPTS;
+}
+
+export function rateLimitResetAt(key: string): number | null {
+  const bucket = buckets.get(key);
+  return bucket && Date.now() < bucket.resetAt ? bucket.resetAt : null;
+}
+
+
+
+================================================
+FILE: src/lib/auth/session.ts
+================================================
+import { cookies } from "next/headers";
+import type { NextResponse } from "next/server";
+import { eq, and, gt, desc, ne } from "drizzle-orm";
+import { db } from "@/db";
+import { members, sessions } from "@/db/schema";
+
+export const SESSION_COOKIE = "sindaris_session_id";
+export const SESSION_EXPIRY_COOKIE = "sindaris_session_expires_at";
+export const SESSION_MAX_AGE_DAYS = 30;
+export const SESSION_MAX_AGE_SECONDS = SESSION_MAX_AGE_DAYS * 24 * 60 * 60;
+export const SESSION_EXTENSION_THRESHOLD_MS = 12 * 60 * 60 * 1000; // 12 часов
+
+export interface SessionMember {
+  sessionId: string;
+  memberId: number;
+  discordId: string;
+  discordName: string;
+  displayName: string;
+  avatarUrl: string | null;
+  serverId: string;
+  serverName: string;
+  roles: string[];
+  accessLevel: string;
+  memberSince: Date | null;
+  profileUpdatedAt: Date;
+  expiresAt: Date;
+}
+
+type MemberRow = typeof members.$inferSelect;
+
+interface CookieSetOptions {
+  name: string;
+  value: string;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: "strict" | "lax" | "none";
+  path?: string;
+  maxAge?: number;
+}
+
+interface CookieStoreLike {
+  get(name: string): { value: string } | undefined;
+  set(options: CookieSetOptions): void;
+  delete(name: string): void;
+}
+
+function isProduction() {
+  return process.env.NODE_ENV === "production";
+}
+
+/** Cookie с UUID сессии — httpOnly. */
+export function sessionIdCookie(sessionId: string): CookieSetOptions {
+  return {
+    name: SESSION_COOKIE,
+    value: sessionId,
+    httpOnly: true,
+    secure: isProduction(),
+    sameSite: "lax",
+    path: "/",
+    maxAge: SESSION_MAX_AGE_SECONDS,
+  };
+}
+
+/**
+ * Cookie со временем истечения — НЕ httpOnly, читается клиентом
+ * (TerminalShell / CabinetWorkspace делают Number(value)), поэтому значение — epoch-ms.
+ */
+export function sessionExpiryCookie(expiresAt: Date): CookieSetOptions {
+  return {
+    name: SESSION_EXPIRY_COOKIE,
+    value: String(expiresAt.getTime()),
+    httpOnly: false,
+    secure: isProduction(),
+    sameSite: "lax",
+    path: "/",
+    maxAge: SESSION_MAX_AGE_SECONDS,
+  };
+}
+
+function toSessionMember(sessionId: string, member: MemberRow, expiresAt: Date): SessionMember {
+  return {
+    sessionId,
+    memberId: member.id,
+    discordId: member.discordId,
+    discordName: member.discordName,
+    displayName: member.displayName,
+    avatarUrl: member.avatarUrl,
+    serverId: member.serverId,
+    serverName: member.serverName,
+    roles: member.roles ?? [],
+    accessLevel: member.accessLevel,
+    memberSince: member.memberSince,
+    profileUpdatedAt: member.updatedAt,
+    expiresAt,
+  };
+}
+
+export async function createSession(
+  memberId: number,
+  metadata?: { ip?: string; userAgent?: string },
+): Promise<SessionMember> {
+  const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000);
+
+  const [session] = await db
+    .insert(sessions)
+    .values({
+      memberId,
+      expiresAt,
+      lastIp: metadata?.ip?.slice(0, 100) ?? null,
+      userAgent: metadata?.userAgent?.slice(0, 300) ?? null,
+    })
+    .returning();
+
+  const [member] = await db.select().from(members).where(eq(members.id, memberId)).limit(1);
+  if (!member) {
+    throw new Error(`Member ${memberId} not found during session creation`);
+  }
+
+  return toSessionMember(session.id, member, session.expiresAt);
+}
+
+/** Ставит обе cookie через next/headers (для Route Handlers, возвращающих JSON). */
+export async function setSessionCookies(sessionMember: SessionMember): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.set(sessionIdCookie(sessionMember.sessionId));
+  cookieStore.set(sessionExpiryCookie(sessionMember.expiresAt));
+}
+
+/** Ставит обе cookie прямо на объект ответа (надёжно для redirect-ответов). */
+export function attachSessionCookies(response: NextResponse, sessionMember: SessionMember): NextResponse {
+  response.cookies.set(sessionIdCookie(sessionMember.sessionId));
+  response.cookies.set(sessionExpiryCookie(sessionMember.expiresAt));
+  return response;
+}
+
+export async function clearSessionCookies(): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.delete(SESSION_COOKIE);
+  cookieStore.delete(SESSION_EXPIRY_COOKIE);
+}
+
+/** Чтение сессии с продлением (для Route Handlers / Server Components). */
+export async function readSessionFromCookieStore(cookieStore: CookieStoreLike): Promise<SessionMember | null> {
+  const sessionId = cookieStore.get(SESSION_COOKIE)?.value;
+  if (!sessionId) return null;
+
+  const [session] = await db
+    .select()
+    .from(sessions)
+    .where(and(eq(sessions.id, sessionId), gt(sessions.expiresAt, new Date())))
+    .limit(1);
+
+  if (!session) {
+    await db.delete(sessions).where(eq(sessions.id, sessionId)).catch(() => undefined);
+    return null;
+  }
+
+  const [member] = await db
+    .select()
+    .from(members)
+    .where(and(eq(members.id, session.memberId), eq(members.isActive, true)))
+    .limit(1);
+
+  if (!member) {
+    await db.delete(sessions).where(eq(sessions.id, sessionId)).catch(() => undefined);
+    return null;
+  }
+
+  const now = new Date();
+  const shouldExtend =
+    !session.lastSeenAt ||
+    now.getTime() - new Date(session.lastSeenAt).getTime() > SESSION_EXTENSION_THRESHOLD_MS;
+
+  if (!shouldExtend) {
+    return toSessionMember(session.id, member, session.expiresAt);
+  }
+
+  const newExpiresAt = new Date(now.getTime() + SESSION_MAX_AGE_SECONDS * 1000);
+  await db
+    .update(sessions)
+    .set({ lastSeenAt: now, expiresAt: newExpiresAt })
+    .where(eq(sessions.id, session.id));
+
+  try {
+    cookieStore.set(sessionIdCookie(session.id));
+    cookieStore.set(sessionExpiryCookie(newExpiresAt));
+  } catch {
+    // В Server Components cookies().set недоступен — продление в БД уже записано,
+    // cookie обновится при следующем запросе к Route Handler.
+  }
+
+  return toSessionMember(session.id, member, newExpiresAt);
+}
+
+export async function readSession(): Promise<SessionMember | null> {
+  const cookieStore = await cookies();
+  return readSessionFromCookieStore(cookieStore);
+}
+
+/** Проверка сессии без продления и без записи cookie (используется в proxy.ts). */
+export async function validateSessionById(sessionId: string): Promise<SessionMember | null> {
+  const [session] = await db
+    .select()
+    .from(sessions)
+    .where(and(eq(sessions.id, sessionId), gt(sessions.expiresAt, new Date())))
+    .limit(1);
+
+  if (!session) {
+    await db.delete(sessions).where(eq(sessions.id, sessionId)).catch(() => undefined);
+    return null;
+  }
+
+  const [member] = await db
+    .select()
+    .from(members)
+    .where(and(eq(members.id, session.memberId), eq(members.isActive, true)))
+    .limit(1);
+
+  if (!member) {
+    await db.delete(sessions).where(eq(sessions.id, sessionId)).catch(() => undefined);
+    return null;
+  }
+
+  return toSessionMember(session.id, member, session.expiresAt);
+}
+
+export async function destroySession(sessionId?: string): Promise<void> {
+  const id = sessionId ?? (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!id) return;
+  await db.delete(sessions).where(eq(sessions.id, id)).catch(() => undefined);
+  if (!sessionId) {
+    await clearSessionCookies();
+  }
+}
+
+export async function listMemberSessions(memberId: number) {
+  return db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.memberId, memberId))
+    .orderBy(desc(sessions.createdAt));
+}
+
+export async function destroyOtherSessions(memberId: number, currentSessionId: string): Promise<void> {
+  await db
+    .delete(sessions)
+    .where(and(eq(sessions.memberId, memberId), ne(sessions.id, currentSessionId)));
+}
+
+
+
+================================================
+FILE: src/lib/auth/tokens.ts
+================================================
+import { timingSafeEqual } from "node:crypto";
+
+/**
+ * Сравнение строк в постоянном времени.
+ * Используется для проверки токенов, чтобы не утекать через timing-атаки.
+ */
+export function constantTimeEqual(left: string, right: string): boolean {
+  const a = Buffer.from(left, "utf8");
+  const b = Buffer.from(right, "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 
 
