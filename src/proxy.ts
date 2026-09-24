@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, validateSessionById } from "@/lib/auth/session";
+import { getPublicAppUrl } from "@/lib/auth/public-url";
 
 /** Публичные маршруты: вход, health и статика. Всё остальное — только с валидной сессией в БД. */
 function isPublicPath(pathname: string): boolean {
@@ -43,7 +44,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const loginUrl = new URL("/", request.url);
+  const loginUrl = new URL("/", getPublicAppUrl());
   loginUrl.searchParams.set("next", pathname);
   const response = NextResponse.redirect(loginUrl);
   // Протухшие cookie чистим, чтобы TerminalShell не зациклился.

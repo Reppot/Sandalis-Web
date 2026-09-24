@@ -5,6 +5,7 @@ import { members } from "@/db/schema";
 import { attachSessionCookies, createSession } from "@/lib/auth/session";
 import { accessLevelFromRoles, mapDiscordRoles } from "@/lib/discord-roles";
 import { isRateLimited } from "@/lib/auth/rate-limit";
+import { getPublicAppUrl } from "@/lib/auth/public-url";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -12,10 +13,10 @@ export const runtime = "nodejs";
 const OAUTH_STATE_COOKIE = "sindaris_oauth_state";
 const GUILD_ID = process.env.DISCORD_GUILD_ID?.trim() || process.env.DISCORD_SERVER_ID?.trim() || "762509239683776512";
 
-function getRedirectUri(requestUrl: string): string {
+function getRedirectUri(): string {
   const configured = process.env.DISCORD_REDIRECT_URI?.trim();
   if (configured) return configured;
-  return `${new URL(requestUrl).origin}/api/auth/discord/callback`;
+  return `${getPublicAppUrl()}/api/auth/discord/callback`;
 }
 
 interface DiscordTokenResponse {
@@ -144,18 +145,24 @@ async function upsertMember(user: DiscordUser, guildMember: DiscordGuildMember):
   return created.id;
 }
 
-function redirectWithError(origin: string, code: string): NextResponse {
-  const response = NextResponse.redirect(new URL(`/?error=${code}`, origin));
-  response.cookies.delete(OAUTH_STATE_COOKIE);
+function redirectWithError(publicUrl: string, code: string): NextResponse {
+  const response = NextResponse.redirect(
+    new URL(`/?error=${code}`, publicUrl),
+  );
+  response.cookies.delete({
+    name: OAUTH_STATE_COOKIE,
+    path: "/",
+  });
   return response;
 }
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
+  const publicUrl = getPublicAppUrl();
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
 
   if (isRateLimited(`discord_callback:${ip}`)) {
-    return redirectWithError(url.origin, "rate_limited");
+    return redirectWithError(publicUrl, "rate_limited");
   }
 
   const cookieHeader = request.headers.get("cookie") ?? "";
@@ -170,18 +177,18 @@ export async function GET(request: Request) {
   const oauthError = url.searchParams.get("error");
 
   if (oauthError) {
-    return redirectWithError(url.origin, "oauth_failed");
+    return redirectWithError(publicUrl, "oauth_failed");
   }
   if (!savedState || !state || savedState !== state) {
     console.error("[SIND][DISCORD_CALLBACK] state mismatch");
-    return redirectWithError(url.origin, "state_mismatch");
+    return redirectWithError(publicUrl, "state_mismatch");
   }
   if (!code) {
-    return redirectWithError(url.origin, "oauth_failed");
+    return redirectWithError(publicUrl, "oauth_failed");
   }
 
   try {
-    const tokenData = await exchangeCode(code, getRedirectUri(request.url));
+    const tokenData = await exchangeCode(code, getRedirectUri());
     const user = await fetchDiscordUser(tokenData.access_token);
     const guildMember = await fetchGuildMember(tokenData.access_token);
     const memberId = await upsertMember(user, guildMember);
@@ -193,15 +200,15 @@ export async function GET(request: Request) {
 
     console.log(`[SIND][DISCORD_CALLBACK] login ok: member=${memberId} discord=${user.id} roles=${guildMember.roles.length}`);
 
-    const response = NextResponse.redirect(new URL("/cabinet", url.origin));
+    const response = NextResponse.redirect(new URL("/cabinet", publicUrl));
     response.cookies.delete(OAUTH_STATE_COOKIE);
     return attachSessionCookies(response, session);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message === "NOT_ON_SERVER") {
-      return redirectWithError(url.origin, "not_on_server");
+      return redirectWithError(publicUrl, "not_on_server");
     }
     console.error("[SIND][DISCORD_CALLBACK] ERROR:", message);
-    return redirectWithError(url.origin, "oauth_failed");
+    return redirectWithError(publicUrl, "oauth_failed");
   }
 }
