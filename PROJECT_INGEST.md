@@ -424,6 +424,10 @@ Directory structure:
         │   │   └── page.tsx
         │   ├── orders/
         │   │   └── page.tsx
+        │   ├── privacy/
+        │   │   └── page.tsx
+        │   ├── terms/
+        │   │   └── page.tsx
         │   ├── timers/
         │   │   └── page.tsx
         │   ├── tools/
@@ -484,6 +488,7 @@ Directory structure:
             ├── time.ts
             ├── types.ts
             ├── auth/
+            │   ├── public-url.ts
             │   ├── rate-limit.ts
             │   ├── session.ts
             │   └── tokens.ts
@@ -742,7 +747,7 @@ FILE: next-env.d.ts
 ================================================
 /// <reference types="next" />
 /// <reference types="next/image-types/global" />
-import "./.next/types/routes.d.ts";
+import "./.next/dev/types/routes.d.ts";
 
 // NOTE: This file should not be edited
 // see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
@@ -3492,6 +3497,7 @@ FILE: src/proxy.ts
 ================================================
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, validateSessionById } from "@/lib/auth/session";
+import { getPublicAppUrl } from "@/lib/auth/public-url";
 
 /** Публичные маршруты: вход, health и статика. Всё остальное — только с валидной сессией в БД. */
 function isPublicPath(pathname: string): boolean {
@@ -3535,7 +3541,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const loginUrl = new URL("/", request.url);
+  const loginUrl = new URL("/", getPublicAppUrl());
   loginUrl.searchParams.set("next", pathname);
   const response = NextResponse.redirect(loginUrl);
   // Протухшие cookie чистим, чтобы TerminalShell не зациклился.
@@ -4551,37 +4557,38 @@ export default function LoginPage() {
 ================================================
 FILE: src/app/api/auth/discord/authorize/route.ts
 ================================================
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { isRateLimited } from "@/lib/auth/rate-limit";
+import { getPublicAppUrl } from "@/lib/auth/public-url";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const OAUTH_STATE_COOKIE = "sindaris_oauth_state";
 
-function getRedirectUri(request: Request): string {
+function getRedirectUri(): string {
   const configured = process.env.DISCORD_REDIRECT_URI?.trim();
   if (configured) return configured;
-  return `${new URL(request.url).origin}/api/auth/discord/callback`;
+  return `${getPublicAppUrl()}/api/auth/discord/callback`;
 }
 
 export async function GET(request: Request) {
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   if (isRateLimited(`discord_authorize:${ip}`)) {
-    return NextResponse.redirect(new URL("/?error=rate_limited", request.url));
+    return NextResponse.redirect(new URL("/?error=rate_limited", getPublicAppUrl()));
   }
 
   const clientId = process.env.DISCORD_CLIENT_ID?.trim();
   if (!clientId) {
-    return NextResponse.redirect(new URL("/?error=oauth_not_configured", request.url));
+    return NextResponse.redirect(new URL("/?error=oauth_not_configured", getPublicAppUrl()));
   }
 
   const state = randomBytes(32).toString("hex");
 
   const authorizeUrl = new URL("https://discord.com/oauth2/authorize");
   authorizeUrl.searchParams.set("client_id", clientId);
-  authorizeUrl.searchParams.set("redirect_uri", getRedirectUri(request));
+  authorizeUrl.searchParams.set("redirect_uri", getRedirectUri());
   authorizeUrl.searchParams.set("response_type", "code");
   authorizeUrl.searchParams.set("scope", "identify guilds.members.read");
   authorizeUrl.searchParams.set("state", state);
@@ -4602,6 +4609,7 @@ export async function GET(request: Request) {
 
 
 
+
 ================================================
 FILE: src/app/api/auth/discord/callback/route.ts
 ================================================
@@ -4612,6 +4620,7 @@ import { members } from "@/db/schema";
 import { attachSessionCookies, createSession } from "@/lib/auth/session";
 import { accessLevelFromRoles, mapDiscordRoles } from "@/lib/discord-roles";
 import { isRateLimited } from "@/lib/auth/rate-limit";
+import { getPublicAppUrl } from "@/lib/auth/public-url";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -4619,10 +4628,10 @@ export const runtime = "nodejs";
 const OAUTH_STATE_COOKIE = "sindaris_oauth_state";
 const GUILD_ID = process.env.DISCORD_GUILD_ID?.trim() || process.env.DISCORD_SERVER_ID?.trim() || "762509239683776512";
 
-function getRedirectUri(requestUrl: string): string {
+function getRedirectUri(): string {
   const configured = process.env.DISCORD_REDIRECT_URI?.trim();
   if (configured) return configured;
-  return `${new URL(requestUrl).origin}/api/auth/discord/callback`;
+  return `${getPublicAppUrl()}/api/auth/discord/callback`;
 }
 
 interface DiscordTokenResponse {
@@ -4751,18 +4760,24 @@ async function upsertMember(user: DiscordUser, guildMember: DiscordGuildMember):
   return created.id;
 }
 
-function redirectWithError(origin: string, code: string): NextResponse {
-  const response = NextResponse.redirect(new URL(`/?error=${code}`, origin));
-  response.cookies.delete(OAUTH_STATE_COOKIE);
+function redirectWithError(publicUrl: string, code: string): NextResponse {
+  const response = NextResponse.redirect(
+    new URL(`/?error=${code}`, publicUrl),
+  );
+  response.cookies.delete({
+    name: OAUTH_STATE_COOKIE,
+    path: "/",
+  });
   return response;
 }
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
+  const publicUrl = getPublicAppUrl();
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
 
   if (isRateLimited(`discord_callback:${ip}`)) {
-    return redirectWithError(url.origin, "rate_limited");
+    return redirectWithError(publicUrl, "rate_limited");
   }
 
   const cookieHeader = request.headers.get("cookie") ?? "";
@@ -4777,18 +4792,18 @@ export async function GET(request: Request) {
   const oauthError = url.searchParams.get("error");
 
   if (oauthError) {
-    return redirectWithError(url.origin, "oauth_failed");
+    return redirectWithError(publicUrl, "oauth_failed");
   }
   if (!savedState || !state || savedState !== state) {
     console.error("[SIND][DISCORD_CALLBACK] state mismatch");
-    return redirectWithError(url.origin, "state_mismatch");
+    return redirectWithError(publicUrl, "state_mismatch");
   }
   if (!code) {
-    return redirectWithError(url.origin, "oauth_failed");
+    return redirectWithError(publicUrl, "oauth_failed");
   }
 
   try {
-    const tokenData = await exchangeCode(code, getRedirectUri(request.url));
+    const tokenData = await exchangeCode(code, getRedirectUri());
     const user = await fetchDiscordUser(tokenData.access_token);
     const guildMember = await fetchGuildMember(tokenData.access_token);
     const memberId = await upsertMember(user, guildMember);
@@ -4800,16 +4815,16 @@ export async function GET(request: Request) {
 
     console.log(`[SIND][DISCORD_CALLBACK] login ok: member=${memberId} discord=${user.id} roles=${guildMember.roles.length}`);
 
-    const response = NextResponse.redirect(new URL("/cabinet", url.origin));
+    const response = NextResponse.redirect(new URL("/cabinet", publicUrl));
     response.cookies.delete(OAUTH_STATE_COOKIE);
     return attachSessionCookies(response, session);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message === "NOT_ON_SERVER") {
-      return redirectWithError(url.origin, "not_on_server");
+      return redirectWithError(publicUrl, "not_on_server");
     }
     console.error("[SIND][DISCORD_CALLBACK] ERROR:", message);
-    return redirectWithError(url.origin, "oauth_failed");
+    return redirectWithError(publicUrl, "oauth_failed");
   }
 }
 
@@ -5661,6 +5676,332 @@ export const metadata: Metadata = { title: "Заказы — SINDARIS Терми
 
 export default function OrdersPage() {
   return <OrdersWorkspace />;
+}
+
+
+
+================================================
+FILE: src/app/privacy/page.tsx
+================================================
+import type { Metadata } from "next";
+import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "Политика конфиденциальности — SINDARIS Terminal",
+  description:
+    "Политика конфиденциальности внутреннего терминала SINDARIS: какие данные обрабатываются, для чего используются и как хранятся.",
+  alternates: { canonical: "/privacy" },
+};
+
+export default function PrivacyPage() {
+  return (
+    <main className="auth-screen">
+      <div className="absolute inset-0 z-0 bg-black/60 backdrop-blur-[2px]" aria-hidden />
+
+      <section className="auth-panel panel panel-corners relative z-10 my-4 max-h-[92dvh] w-full max-w-3xl overflow-y-auto">
+        <div className="auth-scanline" aria-hidden />
+
+        <header className="auth-header">
+          <h1 className="auth-title">Политика конфиденциальности SINDARIS Terminal</h1>
+          <p className="auth-subtitle">Публичная редакция для Discord Developer Portal</p>
+        </header>
+
+        <div className="auth-rule" />
+
+        <article className="space-y-6 text-sm leading-relaxed text-white/90">
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              1. Какие данные обрабатываются
+            </h2>
+            <p className="mb-2">Сайт может обрабатывать:</p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Discord user ID;</li>
+              <li>Discord username;</li>
+              <li>display name;</li>
+              <li>URL аватара;</li>
+              <li>идентификатор Discord-сервера;</li>
+              <li>Discord-роли, если они используются для определения доступа;</li>
+              <li>дату первого входа;</li>
+              <li>дату последнего входа;</li>
+              <li>технические данные сессии, необходимые для авторизации.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              2. Для чего используются данные
+            </h2>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>авторизация через Discord;</li>
+              <li>проверка членства в Discord-сервере;</li>
+              <li>определение ролей и уровня доступа;</li>
+              <li>отображение профиля участника;</li>
+              <li>защита сайта;</li>
+              <li>ведение журнала действий, если такая функция включена;</li>
+              <li>поддержание сессии пользователя.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              3. Какие данные не собираются
+            </h2>
+            <p className="mb-2">
+              Сайт не использует рекламные трекеры, аналитические сервисы, платёжные системы, массовые рассылки и не
+              продаёт пользовательские данные.
+            </p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Не используется Google Analytics или аналогичные аналитические инструменты.</li>
+              <li>Не собираются платёжные данные.</li>
+              <li>Не проводятся рекламные рассылки.</li>
+              <li>Данные не передаются третьим лицам в коммерческих целях.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              4. Где хранятся данные
+            </h2>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Данные аккаунта хранятся в базе PostgreSQL через Supabase.</li>
+              <li>Сайт запускается на Render.</li>
+              <li>Discord используется для OAuth2-аутентификации.</li>
+              <li>Секреты приложения не отображаются пользователям.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              5. Cookies и сессии
+            </h2>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Для входа используются необходимые cookies.</li>
+              <li>Сессионная cookie используется для поддержания авторизации.</li>
+              <li>Сессионные cookies имеют HttpOnly и Secure в production.</li>
+              <li>Аналитические cookies не используются.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              6. Срок хранения
+            </h2>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Данные хранятся столько, сколько необходимо для работы кланового сайта и управления доступом.</li>
+              <li>Администратор может отключить или удалить профиль.</li>
+              <li>Пользователь может обратиться к администрации с просьбой удалить или исправить данные.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              7. Сторонние сервисы
+            </h2>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Discord — OAuth2 и данные профиля.</li>
+              <li>Supabase — база данных.</li>
+              <li>Render — размещение приложения.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              8. Права пользователя
+            </h2>
+            <p className="mb-2">Пользователь может обратиться к администрации, чтобы:</p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>узнать, какие данные хранятся;</li>
+              <li>исправить данные;</li>
+              <li>удалить профиль или отключить доступ;</li>
+              <li>получить разъяснения по обработке данных.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              9. Изменения политики
+            </h2>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Политика может изменяться.</li>
+              <li>
+                Актуальная версия находится на странице{" "}
+                <Link href="/privacy" className="text-accent-soft underline hover:text-accent">
+                  /privacy
+                </Link>
+                .
+              </li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              10. Контакты
+            </h2>
+            <p>
+              По вопросам конфиденциальности обращаться к администрации Discord-сервера SINDARIS.
+            </p>
+          </section>
+        </article>
+
+        <div className="auth-rule" />
+
+        <footer className="flex flex-col gap-3 text-xs text-white/60 sm:flex-row sm:items-center sm:justify-between">
+          <span>Последнее обновление: 21 сентября 2026 г.</span>
+          <div className="flex flex-wrap gap-4">
+            <Link href="/" className="text-accent-soft underline hover:text-accent">
+              ← Назад к входу
+            </Link>
+            <Link href="/terms" className="text-accent-soft underline hover:text-accent">
+              Условия использования
+            </Link>
+          </div>
+        </footer>
+      </section>
+    </main>
+  );
+}
+
+
+
+================================================
+FILE: src/app/terms/page.tsx
+================================================
+import type { Metadata } from "next";
+import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "Условия использования — SINDARIS Terminal",
+  description:
+    "Условия использования внутреннего информационно-логистического терминала SINDARIS для Foxhole.",
+  alternates: { canonical: "/terms" },
+};
+
+export default function TermsPage() {
+  return (
+    <main className="auth-screen">
+      <div className="absolute inset-0 z-0 bg-black/60 backdrop-blur-[2px]" aria-hidden />
+
+      <section className="auth-panel panel panel-corners relative z-10 my-4 max-h-[92dvh] w-full max-w-3xl overflow-y-auto">
+        <div className="auth-scanline" aria-hidden />
+
+        <header className="auth-header">
+          <h1 className="auth-title">Условия использования SINDARIS Terminal</h1>
+          <p className="auth-subtitle">Публичная редакция для Discord Developer Portal</p>
+        </header>
+
+        <div className="auth-rule" />
+
+        <article className="space-y-6 text-sm leading-relaxed text-white/90">
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              1. Общие положения
+            </h2>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>
+                SINDARIS Terminal — внутренний информационно-логистический сайт игрового сообщества SINDARIS для Foxhole.
+              </li>
+              <li>Использование сайта означает согласие с настоящими условиями.</li>
+              <li>Если пользователь не согласен, он должен прекратить использование сайта.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              2. Доступ к сайту
+            </h2>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Доступ предназначен для участников Discord-сервера сообщества.</li>
+              <li>Для авторизации используется Discord OAuth2.</li>
+              <li>Администраторы могут ограничить или отключить доступ пользователя.</li>
+              <li>Нельзя передавать доступ третьим лицам.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              3. Правила использования
+            </h2>
+            <p className="mb-2">Запрещено:</p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>пытаться получить несанкционированный доступ;</li>
+              <li>обходить проверку ролей и разрешений;</li>
+              <li>использовать сайт для атак, спама или вредоносных действий;</li>
+              <li>загружать вредоносные данные;</li>
+              <li>нарушать работу сайта;</li>
+              <li>выдавать себя за другого участника.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              4. Пользовательские данные
+            </h2>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Данные Discord используются для авторизации и управления доступом.</li>
+              <li>Пользователь должен предоставлять корректную информацию в своём Discord-профиле.</li>
+              <li>
+                Подробности обработки описаны на странице{" "}
+                <Link href="/privacy" className="text-accent-soft underline hover:text-accent">
+                  /privacy
+                </Link>
+                .
+              </li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              5. Доступность сайта
+            </h2>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Сайт предоставляется «как есть».</li>
+              <li>Возможны технические работы, ошибки, перерывы и изменения функциональности.</li>
+              <li>Администрация не гарантирует постоянную доступность сайта.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              6. Изменение условий
+            </h2>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Условия могут изменяться.</li>
+              <li>
+                Актуальная версия всегда публикуется на странице{" "}
+                <Link href="/terms" className="text-accent-soft underline hover:text-accent">
+                  /terms
+                </Link>
+                .
+              </li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-accent">
+              7. Контакты
+            </h2>
+            <p>
+              По вопросам доступа обращаться к администрации Discord-сервера SINDARIS.
+            </p>
+          </section>
+        </article>
+
+        <div className="auth-rule" />
+
+        <footer className="flex flex-col gap-3 text-xs text-white/60 sm:flex-row sm:items-center sm:justify-between">
+          <span>Последнее обновление: 21 сентября 2026 г.</span>
+          <div className="flex flex-wrap gap-4">
+            <Link href="/" className="text-accent-soft underline hover:text-accent">
+              ← Назад к входу
+            </Link>
+            <Link href="/privacy" className="text-accent-soft underline hover:text-accent">
+              Политика конфиденциальности
+            </Link>
+          </div>
+        </footer>
+      </section>
+    </main>
+  );
 }
 
 
@@ -7571,8 +7912,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useRiskSummary, useTerminal } from "../providers/TerminalProvider";
+import { useTerminal } from "../providers/TerminalProvider";
 import { useTheme } from "../providers/ThemeProvider";
+
 
 export function ThemeIcon({ theme, size = 30 }: { theme: "dark" | "light"; size?: number }) {
   return theme === "dark" ? (
@@ -7590,7 +7932,6 @@ export function ThemeIcon({ theme, size = 30 }: { theme: "dark" | "light"; size?
 export function Sidebar() {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
-  const risk = useRiskSummary();
   const { showStockpile, showConstructor, setShowStockpile, setShowConstructor } = useTerminal();
   const [expanded, setExpanded] = useState(false);
 
@@ -7688,11 +8029,28 @@ export function Sidebar() {
       </nav>
 
       {expanded && (
-        <div className="rounded border px-3 py-2 font-mono text-[0.62rem] leading-relaxed" style={{ borderColor: "var(--chrome-border)", background: "rgba(0,0,0,0.12)" }}>
-          <div className="hud-label chrome-muted mb-1">Риски снабжения</div>
-          <div className="flex justify-between"><span>🚨 &lt;1ч</span><span style={{ color: "var(--tk-critical)" }}>{risk.critical}</span></div>
-          <div className="flex justify-between"><span>⚠️ &lt;24ч</span><span style={{ color: "var(--tk-warning)" }}>{risk.warning}</span></div>
-          <div className="flex justify-between"><span>✅ &gt;1д</span><span style={{ color: "var(--tk-safe)" }}>{risk.safe}</span></div>
+        <div
+          className="flex w-full gap-1 rounded border p-1"
+          style={{
+            borderColor: "var(--chrome-border)",
+            background: "rgba(0,0,0,0.12)",
+          }}
+        >
+          <Link
+            href="/privacy"
+            className="flex-1 rounded border px-1 py-2 text-center font-mono text-[0.58rem] font-bold tracking-wider transition-colors hover:text-[var(--accent)]"
+            style={{ borderColor: "var(--chrome-border)" }}
+          >
+            PRIVACY
+          </Link>
+
+          <Link
+            href="/terms"
+            className="flex-1 rounded border px-1 py-2 text-center font-mono text-[0.58rem] font-bold tracking-wider transition-colors hover:text-[var(--accent)]"
+            style={{ borderColor: "var(--chrome-border)" }}
+          >
+            TERMS
+          </Link>
         </div>
       )}
 
@@ -10259,6 +10617,22 @@ export interface ScanResponse {
 export type Severity = "critical" | "warning" | "safe";
 export type ExportFormat = "txt" | "xlsx" | "png" | "clipboard";
 export type PanelMode = "export" | "import";
+
+
+
+================================================
+FILE: src/lib/auth/public-url.ts
+================================================
+﻿export function getPublicAppUrl(): string {
+  const configured = process.env.PUBLIC_APP_URL?.trim();
+
+  return (
+    configured ||
+    (process.env.NODE_ENV === "production"
+      ? "https://sandalis-web-mtbf.onrender.com"
+      : "http://localhost:3000")
+  ).replace(/\/+$/, "");
+}
 
 
 
