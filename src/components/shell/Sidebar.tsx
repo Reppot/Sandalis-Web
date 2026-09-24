@@ -5,8 +5,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useRiskSummary, useTerminal } from "../providers/TerminalProvider";
+import { useTerminal } from "../providers/TerminalProvider";
 import { useTheme } from "../providers/ThemeProvider";
+
 
 export function ThemeIcon({ theme, size = 30 }: { theme: "dark" | "light"; size?: number }) {
   return theme === "dark" ? (
@@ -24,7 +25,6 @@ export function ThemeIcon({ theme, size = 30 }: { theme: "dark" | "light"; size?
 export function Sidebar() {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
-  const risk = useRiskSummary();
   const { showStockpile, showConstructor, setShowStockpile, setShowConstructor } = useTerminal();
   const [expanded, setExpanded] = useState(false);
 
@@ -122,11 +122,28 @@ export function Sidebar() {
       </nav>
 
       {expanded && (
-        <div className="rounded border px-3 py-2 font-mono text-[0.62rem] leading-relaxed" style={{ borderColor: "var(--chrome-border)", background: "rgba(0,0,0,0.12)" }}>
-          <div className="hud-label chrome-muted mb-1">Риски снабжения</div>
-          <div className="flex justify-between"><span>🚨 &lt;1ч</span><span style={{ color: "var(--tk-critical)" }}>{risk.critical}</span></div>
-          <div className="flex justify-between"><span>⚠️ &lt;24ч</span><span style={{ color: "var(--tk-warning)" }}>{risk.warning}</span></div>
-          <div className="flex justify-between"><span>✅ &gt;1д</span><span style={{ color: "var(--tk-safe)" }}>{risk.safe}</span></div>
+        <div
+          className="flex w-full gap-1 rounded border p-1"
+          style={{
+            borderColor: "var(--chrome-border)",
+            background: "rgba(0,0,0,0.12)",
+          }}
+        >
+          <Link
+            href="/privacy"
+            className="flex-1 rounded border px-1 py-2 text-center font-mono text-[0.58rem] font-bold tracking-wider transition-colors hover:text-[var(--accent)]"
+            style={{ borderColor: "var(--chrome-border)" }}
+          >
+            PRIVACY
+          </Link>
+
+          <Link
+            href="/terms"
+            className="flex-1 rounded border px-1 py-2 text-center font-mono text-[0.58rem] font-bold tracking-wider transition-colors hover:text-[var(--accent)]"
+            style={{ borderColor: "var(--chrome-border)" }}
+          >
+            TERMS
+          </Link>
         </div>
       )}
 
