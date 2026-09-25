@@ -2,7 +2,9 @@
 
 import Image from "next/image";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
+
+const LOGIN_VIDEO_URL = "https://imoeicmsrtvsigjglqqy.supabase.co/storage/v1/object/public/media/video.mp4";
 
 const errorMessages: Record<string, string> = {
   not_on_server: "Этот Discord-аккаунт не на сервере SINDARIS.",
@@ -12,67 +14,49 @@ const errorMessages: Record<string, string> = {
   rate_limited: "Слишком много попыток. Попробуйте позже.",
 };
 
-const LOGIN_VIDEO_URL = "https://imoeicmsrtvsigjglqqy.supabase.co/storage/v1/object/public/media/video.mp4";
-
-/**
- * Фоновое видео исключительно для страницы авторизации /login.
- * Поддерживает object-fit: cover, умеренное затемнение, fallback при сбое и prefers-reduced-motion.
- */
-function LoginBackgroundVideo() {
-  const [videoError, setVideoError] = useState(false);
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
+function LoginVideoBackground() {
+  const [videoFailed, setVideoFailed] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setPrefersReducedMotion(mq.matches);
-
-    const handler = (e: MediaQueryListEvent) => {
-      setPrefersReducedMotion(e.matches);
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updateMotionPreference = () => {
+      setReducedMotion(mediaQuery.matches);
     };
 
-    mq.addEventListener?.("change", handler);
-    return () => {
-      mq.removeEventListener?.("change", handler);
-    };
+    updateMotionPreference();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", updateMotionPreference);
+      return () => mediaQuery.removeEventListener("change", updateMotionPreference);
+    }
+
+    mediaQuery.addListener(updateMotionPreference);
+    return () => mediaQuery.removeListener(updateMotionPreference);
   }, []);
 
-  useEffect(() => {
-    if (videoRef.current) {
-      if (prefersReducedMotion) {
-        videoRef.current.pause();
-      } else {
-        videoRef.current.play().catch(() => {
-          // Игнорируем блокировку автовоспроизведения браузером
-        });
-      }
-    }
-  }, [prefersReducedMotion]);
+  const showVideo = !reducedMotion && !videoFailed;
 
   return (
-    <>
-      {!videoError && !prefersReducedMotion && (
+    <div className="auth-video-bg" aria-hidden="true">
+      <div className="auth-video-fallback" />
+      {showVideo && (
         <video
-          ref={videoRef}
+          className="auth-video"
+          src={LOGIN_VIDEO_URL}
           autoPlay
           muted
           loop
           playsInline
           preload="metadata"
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover"
-          src={LOGIN_VIDEO_URL}
-          onError={() => setVideoError(true)}
+          tabIndex={-1}
+          disablePictureInPicture
+          onError={() => setVideoFailed(true)}
         />
       )}
-      {/* Умеренное затемнение и виньетка для четкой читаемости контента */}
-      <div className="pointer-events-none absolute inset-0 z-0 bg-black/60 backdrop-blur-[2px]" aria-hidden="true" />
-      <div
-        className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(ellipse_at_center,_transparent_30%,_rgba(0,0,0,0.75)_100%)]"
-        aria-hidden="true"
-      />
-    </>
+      <div className="auth-video-overlay" />
+    </div>
   );
 }
 
@@ -139,7 +123,7 @@ function LoginForm() {
   if (checking) {
     return (
       <main className="auth-screen">
-        <LoginBackgroundVideo />
+        <LoginVideoBackground />
         <section className="auth-panel panel panel-corners relative z-10 flex min-h-[20rem] items-center justify-center">
           <span className="pulse text-muted">Проверка сессии...</span>
         </section>
@@ -149,7 +133,7 @@ function LoginForm() {
 
   return (
     <main className="auth-screen">
-      <LoginBackgroundVideo />
+      <LoginVideoBackground />
 
       <section className="auth-panel panel panel-corners relative z-10">
         <div className="auth-scanline" aria-hidden />
@@ -230,16 +214,14 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense
-      fallback={
-        <main className="auth-screen">
-          <LoginBackgroundVideo />
-          <section className="auth-panel panel panel-corners relative z-10 flex min-h-[20rem] items-center justify-center">
-            <span className="pulse text-muted">Загрузка...</span>
-          </section>
-        </main>
-      }
-    >
+    <Suspense fallback={
+      <main className="auth-screen">
+        <LoginVideoBackground />
+        <section className="auth-panel panel panel-corners relative z-10 flex min-h-[20rem] items-center justify-center">
+          <span className="pulse text-muted">Загрузка...</span>
+        </section>
+      </main>
+    }>
       <LoginForm />
     </Suspense>
   );
