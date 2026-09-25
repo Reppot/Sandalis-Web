@@ -1,9 +1,13 @@
 "use client";
 
+import { copyText } from "@/lib/exporters";
 import { FACTORY_ITEMS, type FactoryFacility, type FactoryFaction, type FactoryItem } from "@/lib/factory-data";
 import { getItemIconPath } from "@/lib/itemCodes";
 import { useMemo, useState } from "react";
 import { useNotify } from "../providers/NotificationProvider";
+import { ResourceSummaryPanel } from "./ResourceSummaryPanel";
+import { QuantityStepper, ToolItemIcon } from "./ToolControls";
+import { buildToolReportText, type ToolReport } from "./tool-export";
 
 const CATEGORY_LABELS: Record<string, string> = {
   small_arms: "Малое оружие",
@@ -18,11 +22,22 @@ const CATEGORY_LABELS: Record<string, string> = {
   supplies: "Припасы",
 };
 const MATERIAL_LABELS: Record<string, string> = { bmat: "БМАТ", rmat: "РМАТ", emat: "ЭМАТ", hemat: "ТЯЖ. ЭМАТ" };
+/** Иконки материалов для блока итогов (файлы из public/FoxholeWikiPhotos). */
+const MATERIAL_ICONS: Record<string, string> = {
+  bmat: "/FoxholeWikiPhotos/BasicMaterials.webp",
+  rmat: "/FoxholeWikiPhotos/RefinedMaterials.webp",
+  emat: "/FoxholeWikiPhotos/ExplosiveMaterial.webp",
+  hemat: "/FoxholeWikiPhotos/HeavyExplosiveMaterials.webp",
+};
 const FACTIONS: Array<FactoryFaction | "all"> = ["all", "neutral", "colonial", "warden"];
 const FACILITIES: Array<{ key: FactoryFacility; label: string }> = [
   { key: "factory", label: "FACTORY" },
   { key: "mpf", label: "MPF" },
 ];
+
+/** Крупные иконки предметов (задача 5): плитки каталога и строки очереди. Было 48px / 38px. */
+const CATALOG_ICON_SIZE = 88;
+const QUEUE_ICON_SIZE = 56;
 
 function iconFor(item: FactoryItem): string {
   // The downloaded factory icon is local; fallback resolves an existing FoxholeWiki icon.
@@ -43,29 +58,28 @@ function discountSum(base: number, crates: number, facility: FactoryFacility): n
   return total;
 }
 
-function FactoryItemIcon({ item }: { item: FactoryItem }) {
-  const [failed, setFailed] = useState(false);
-  const fallback = getItemIconPath(item.itemName);
-  if (failed && fallback) {
-    return <img src={fallback} alt="" className="factory-item-icon" loading="lazy" onError={() => setFailed(false)} />;
-  }
-  return (
-    <img
-      src={iconFor(item)}
-      alt=""
-      className="factory-item-icon"
-      loading="lazy"
-      onError={(event) => {
-        if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
-        else setFailed(true);
-      }}
-    />
-  );
+/** Игровой лимит ящиков в очереди (режим PRODUCTION) — вынесен из старой функции add без изменения значений. */
+function queueLimit(item: FactoryItem, facility: FactoryFacility): number {
+  return facility === "factory" ? (item.itemCategory === "vehicles" || item.itemCategory === "shipables" ? 5 : 4) : 9;
 }
 
-export function FactoryWorkspace() {
+/** Иконка предмета: локальная /factory-icons → иконка FoxholeWiki → буквенная заглушка (вместо битой картинки). */
+function FactoryItemIcon({ item, size, className }: { item: FactoryItem; size: number; className?: string }) {
+  return <ToolItemIcon sources={[iconFor(item), getItemIconPath(item.itemName)]} size={size} label={item.itemName} className={className} />;
+}
+
+interface FactoryWorkspaceProps {
+  /**
+   * Объект производства задаётся снаружи вкладками раздела «Инструменты» («Калькулятор фабрики» / «MPF»).
+   * Если проп не передан, работает старый внутренний переключатель FACTORY / MPF.
+   */
+  facility?: FactoryFacility;
+}
+
+export function FactoryWorkspace({ facility: controlledFacility }: FactoryWorkspaceProps = {}) {
   const notify = useNotify();
-  const [facility, setFacility] = useState<FactoryFacility>("factory");
+  const [ownFacility, setOwnFacility] = useState<FactoryFacility>("factory");
+  const facility = controlledFacility ?? ownFacility;
   const [planning, setPlanning] = useState(false);
   const [faction, setFaction] = useState<FactoryFaction | "all">("all");
   const [category, setCategory] = useState("all");
@@ -97,9 +111,25 @@ export function FactoryWorkspace() {
     return { materials, crates, seconds };
   }, [facility, rows]);
 
+  // Единые данные для блока итогов и экспорта: название инструмента, выбранные предметы, ресурсы, сводка.
+  const report = useMemo<ToolReport>(() => {
+    const isFactory = facility === "factory";
+    return {
+      toolName: isFactory ? "Калькулятор фабрики" : "MPF — Mass Production Factory",
+      subtitle: `${isFactory ? "Factory" : "Mass Production Factory"} • ${planning ? "PLANNING (без лимитов)" : "PRODUCTION (игровые лимиты)"}`,
+      fileBase: isFactory ? "SINDARIS_фабрика" : "SINDARIS_MPF",
+      items: rows.map(({ item, crates }) => ({ name: item.itemName, quantity: crates, unit: "ящ.", icon: getItemIconPath(item.itemName) })),
+      resources: Object.entries(totals.materials).map(([key, value]) => ({ name: MATERIAL_LABELS[key] ?? key, quantity: Math.round(value), unit: "шт.", icon: MATERIAL_ICONS[key] ?? null })),
+      stats: [
+        { name: "Ящики", quantity: totals.crates, unit: "ящ." },
+        { name: "Время", quantity: formatSeconds(totals.seconds), unit: "" },
+      ],
+    };
+  }, [facility, planning, rows, totals]);
+
   function add(item: FactoryItem) {
     const current = plan[item.itemName] ?? 0;
-    const limit = facility === "factory" ? (item.itemCategory === "vehicles" || item.itemCategory === "shipables" ? 5 : 4) : 9;
+    const limit = queueLimit(item, facility);
     if (!planning && current >= limit) {
       notify({ title: "ЛИМИТ ОЧЕРЕДИ", message: `${item.itemName}: максимум ${limit} ящиков в режиме Production. Переключитесь на Planning для свободного расчёта.`, tone: "warning" });
       return;
@@ -107,53 +137,60 @@ export function FactoryWorkspace() {
     setPlan((previous) => ({ ...previous, [item.itemName]: current + 1 }));
   }
 
-  function change(itemName: string, delta: number) {
+  /** Точное количество из поля ввода/кнопок степпера; в режиме Production режется до игрового лимита. */
+  function setQuantity(item: FactoryItem, requested: number) {
+    const limit = queueLimit(item, facility);
+    let next = Math.max(0, Math.floor(requested));
+    if (!planning && next > limit) {
+      notify({ title: "ЛИМИТ ОЧЕРЕДИ", message: `${item.itemName}: максимум ${limit} ящиков в режиме Production. Переключитесь на Planning для свободного расчёта.`, tone: "warning" });
+      next = limit;
+    }
     setPlan((previous) => {
-      const next = Math.max(0, (previous[itemName] ?? 0) + delta);
       const copy = { ...previous };
-      if (next) copy[itemName] = next;
-      else delete copy[itemName];
+      if (next) copy[item.itemName] = next;
+      else delete copy[item.itemName];
       return copy;
     });
   }
 
   async function copySummary() {
-    const text = [
-      `SINDARIS FACTORY PLAN • ${facility.toUpperCase()} • ${planning ? "PLANNING" : "PRODUCTION"}`,
-      ...rows.map(({ item, crates }) => `${item.itemName} -> ${crates} ящ.`),
-      "",
-      `Материалы: ${Object.entries(totals.materials).map(([key, value]) => `${MATERIAL_LABELS[key] ?? key} ${Math.round(value)}`).join(" • ")}`,
-      `Ящиков: ${totals.crates} • Время: ${formatSeconds(totals.seconds)}`,
-    ].join("\n");
-    try {
-      await navigator.clipboard.writeText(text);
-      notify({ title: "FACTORY PLAN", message: "План производства скопирован в буфер.", tone: "success" });
-    } catch {
-      notify({ title: "БУФЕР", message: "Не удалось скопировать план.", tone: "warning" });
-    }
+    const ok = await copyText(buildToolReportText(report));
+    notify(
+      ok
+        ? { title: "FACTORY PLAN", message: "План производства скопирован в буфер.", tone: "success" }
+        : { title: "БУФЕР", message: "Не удалось скопировать план.", tone: "warning" },
+    );
   }
 
   return (
-    <div className="tab-fade factory-page">
+    // pb-24 на < lg: место под плавающий аккордеон итогов, чтобы он не закрывал последние карточки.
+    <div className="tab-fade factory-page pb-24 lg:pb-0">
       <section className="panel panel-corners factory-topbar">
         <div className="flex min-w-0 items-center gap-3">
-          <img src="/icons/business.png" alt="" className="ui-icon h-10 w-10 object-contain" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={facility === "factory" ? "/icons/business.png" : "/icons/conveyor-belt.png"} alt="" className="ui-icon h-10 w-10 object-contain" />
           <div className="min-w-0">
             <div className="hud-label text-muted">OFFLINE PRODUCTION PLANNER • FOXHOLE</div>
-            <h1 className="panel-title mt-1 text-[1.1rem] md:text-[1.45rem]">⚙ Factory Calculator</h1>
-            <p className="mt-1 text-sm text-white/65">Соберите производственную очередь и мгновенно рассчитайте ресурсы, ящики и ориентировочное время.</p>
+            <h2 className="panel-title mt-1 text-[1.1rem] md:text-[1.45rem]">⚙ {facility === "factory" ? "Калькулятор фабрики" : "MPF — Mass Production Factory"}</h2>
+            <p className="mt-1 text-sm text-white/65">
+              {facility === "factory"
+                ? "Соберите производственную очередь и мгновенно рассчитайте ресурсы, ящики и ориентировочное время."
+                : "Очередь MPF: каждый следующий ящик в партии дешевле на 10% (максимум −50%), лимит — 9 ящиков."}
+            </p>
           </div>
         </div>
         <div className="factory-controls">
-          <div className="factory-toggle-group">
-            {FACILITIES.map((option) => <button key={option.key} className={`btn ${facility === option.key ? "btn-active" : ""}`} onClick={() => setFacility(option.key)}>{option.label}</button>)}
-          </div>
+          {controlledFacility ? null : (
+            <div className="factory-toggle-group">
+              {FACILITIES.map((option) => <button key={option.key} className={`btn ${facility === option.key ? "btn-active" : ""}`} onClick={() => setOwnFacility(option.key)}>{option.label}</button>)}
+            </div>
+          )}
           <button className={`btn ${planning ? "btn-warn btn-active" : ""}`} onClick={() => setPlanning((value) => !value)}>{planning ? "PLANNING" : "PRODUCTION"}</button>
           <button className="btn btn-primary" onClick={() => void copySummary()}>⧉ Поделиться планом</button>
         </div>
       </section>
 
-      <div className="factory-layout">
+      <div className="grid min-h-0 flex-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(340px,400px)]">
         <section className="panel panel-corners factory-catalog">
           <div className="factory-filters">
             <input className="field h-11 flex-1" placeholder="Поиск предмета, класса или описания..." value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -166,48 +203,51 @@ export function FactoryWorkspace() {
             {categories.map((value) => <button key={value} className={`chip ${category === value ? "is-active" : ""}`} onClick={() => setCategory(value)}>{CATEGORY_LABELS[value] ?? value}</button>)}
           </div>
           <div className="factory-count hud-label">Показано: {visibleItems.length} / {FACTORY_ITEMS.length}</div>
-          <div className="factory-item-grid scroll-area">
-            {visibleItems.map((item) => (
-              <button key={item.itemName} className="factory-item-card" onClick={() => add(item)} title={item.itemDesc}>
-                <FactoryItemIcon item={item} />
-                <span className="min-w-0 flex-1 text-left">
-                  <strong className="block truncate text-white">{item.itemName}</strong>
-                  <small className="mt-1 block truncate text-muted">{item.itemClass ?? CATEGORY_LABELS[item.itemCategory] ?? item.itemCategory} • x{item.numberProduced}</small>
-                </span>
-                <span className="factory-add">＋</span>
-              </button>
-            ))}
+
+          {/* Плитки с крупными иконками; auto-fill-сетка сама переносит карточки на узких экранах. */}
+          <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-2.5">
+            {visibleItems.map((item) => {
+              const queued = plan[item.itemName] ?? 0;
+              return (
+                <button
+                  key={item.itemName}
+                  type="button"
+                  className={`factory-item-card relative min-h-[14rem] flex-col justify-start gap-2 p-3 text-center ${queued ? "border-accent" : ""}`}
+                  onClick={() => add(item)}
+                  title={item.itemDesc}
+                >
+                  <span className="factory-add absolute top-2 right-2">＋</span>
+                  {queued ? (
+                    <span className="absolute top-2 left-2 rounded-sm border border-[#16a34a] bg-[#1e291b] px-1.5 py-0.5 font-mono text-[0.65rem] text-accent">{queued} ящ.</span>
+                  ) : null}
+                  <FactoryItemIcon item={item} size={CATALOG_ICON_SIZE} className="mt-3" />
+                  <strong className="line-clamp-2 min-h-[2.5em] w-full text-[0.82rem] leading-tight text-white">{item.itemName}</strong>
+                  <small className="block w-full truncate text-[0.7rem] text-muted">{item.itemClass ?? CATEGORY_LABELS[item.itemCategory] ?? item.itemCategory} • x{item.numberProduced}</small>
+                  <span className="mt-auto flex flex-wrap justify-center gap-1">
+                    {Object.entries(item.cost ?? {}).map(([key, value]) => (
+                      <span key={key} className="rounded-sm border border-white/10 bg-black/30 px-1.5 py-0.5 font-mono text-[0.62rem] text-white/80">
+                        {MATERIAL_LABELS[key] ?? key} {value}
+                      </span>
+                    ))}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </section>
 
-        <aside className="panel panel-corners factory-plan">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="panel-title">Производственная очередь</div>
-              <div className="hud-label mt-1 text-muted">{facility === "factory" ? "Factory" : "Mass Production Factory"} • {planning ? "без лимитов" : "игровые лимиты"}</div>
+        <ResourceSummaryPanel report={report} title="Производственная очередь" emptyHint="Нажимайте ＋ на карточках, чтобы собрать очередь." onClear={() => setPlan({})}>
+          {rows.map(({ item, crates }) => (
+            <div className="factory-plan-row" key={item.itemName}>
+              <FactoryItemIcon item={item} size={QUEUE_ICON_SIZE} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm text-white">{item.itemName}</span>
+                <span className="hud-label mt-0.5 block truncate text-muted">{planning ? "без лимита" : `лимит ${queueLimit(item, facility)} ящ.`}</span>
+              </span>
+              <QuantityStepper value={crates} unit="ящ." label={item.itemName} onChange={(next) => setQuantity(item, next)} />
             </div>
-            <button className="btn btn-danger px-2" onClick={() => setPlan({})} disabled={!rows.length}>✕</button>
-          </div>
-          <div className="factory-rule" />
-          <div className="factory-plan-list scroll-area">
-            {rows.length === 0 ? <div className="hud-label py-10 text-center text-muted">Нажимайте ＋ на предметах слева, чтобы собрать очередь.</div> : rows.map(({ item, crates }) => (
-              <div className="factory-plan-row" key={item.itemName}>
-                <FactoryItemIcon item={item} />
-                <span className="min-w-0 flex-1 truncate text-white">{item.itemName}</span>
-                <button className="btn px-2 py-1" onClick={() => change(item.itemName, -1)}>−</button>
-                <span className="factory-qty">{crates} ящ.</span>
-                <button className="btn px-2 py-1" onClick={() => add(item)}>＋</button>
-              </div>
-            ))}
-          </div>
-          <div className="factory-totals">
-            <div className="factory-total-grid">
-              {Object.entries(totals.materials).map(([key, value]) => <div key={key}><span className="hud-label text-muted">{MATERIAL_LABELS[key] ?? key}</span><strong>{Math.round(value)}</strong></div>)}
-              <div><span className="hud-label text-muted">ЯЩИКИ</span><strong>{totals.crates}</strong></div>
-              <div><span className="hud-label text-muted">ВРЕМЯ</span><strong>{formatSeconds(totals.seconds)}</strong></div>
-            </div>
-          </div>
-        </aside>
+          ))}
+        </ResourceSummaryPanel>
       </div>
     </div>
   );

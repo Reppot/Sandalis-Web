@@ -1,11 +1,9 @@
-import type { Metadata } from "next";
-import { FactoryWorkspace } from "@/components/tools/FactoryWorkspace";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "Factory Calculator — SINDARIS Инструменты",
-  description: "Офлайн-калькулятор производства Foxhole для Factory и MPF.",
-};
-
+/**
+ * Калькулятор фабрики теперь открывается вкладкой в разделе «Инструменты».
+ * Старый адрес /tools/factory сохранён для закладок: он перенаправляет на /tools?tool=factory.
+ */
 export default function FactoryPage() {
-  return <FactoryWorkspace />;
+  redirect("/tools?tool=factory");
 }
